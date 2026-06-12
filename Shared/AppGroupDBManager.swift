@@ -46,13 +46,9 @@ final class AppGroupDBManager {
             return
         }
 
-        // Enable WAL mode
-        execute(pragma: "PRAGMA journal_mode=WAL;")
-        // Set busy timeout to 2000ms
-        execute(pragma: "PRAGMA busy_timeout = 2000;")
-
-        // Create table if not exists
-        execute(pragma: """
+        execute(sql: "PRAGMA journal_mode=WAL;")
+        execute(sql: "PRAGMA busy_timeout = 2000;")
+        execute(sql: """
             CREATE TABLE IF NOT EXISTS file_mapping (
                 file_name TEXT PRIMARY KEY NOT NULL,
                 uid TEXT NOT NULL,
@@ -61,7 +57,7 @@ final class AppGroupDBManager {
         """)
     }
 
-    private func execute(pragma sql: String) {
+    private func execute(sql: String) {
         var errMsg: UnsafeMutablePointer<CChar>?
         if sqlite3_exec(db, sql, nil, nil, &errMsg) != SQLITE_OK {
             if let err = errMsg {
