@@ -6,9 +6,51 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		F431D9A02FDBDD9700C77928 /* DocumentShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F431D9962FDBDD9600C77928 /* DocumentShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		F431D9AB2FDBE02000C77928 /* AppGroupDBManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F431D9AA2FDBE02000C77928 /* AppGroupDBManager.swift */; };
+		F431D9AC2FDBE02100C77928 /* AppGroupDBManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F431D9AA2FDBE02000C77928 /* AppGroupDBManager.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		F431D99E2FDBDD9700C77928 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F431D97C2FDBDD3D00C77928 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F431D9952FDBDD9600C77928;
+			remoteInfo = DocumentShareExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		F431D9A52FDBDD9700C77928 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				F431D9A02FDBDD9700C77928 /* DocumentShareExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		F431D9842FDBDD3D00C77928 /* PasswordManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PasswordManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F431D9962FDBDD9600C77928 /* DocumentShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DocumentShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		F431D9AA2FDBE02000C77928 /* AppGroupDBManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroupDBManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		F431D9A12FDBDD9700C77928 /* Exceptions for "DocumentShareExtension" folder in "DocumentShareExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = F431D9952FDBDD9600C77928 /* DocumentShareExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		F431D9862FDBDD3D00C77928 /* PasswordManager */ = {
@@ -16,10 +58,25 @@
 			path = PasswordManager;
 			sourceTree = "<group>";
 		};
+		F431D9972FDBDD9600C77928 /* DocumentShareExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F431D9A12FDBDD9700C77928 /* Exceptions for "DocumentShareExtension" folder in "DocumentShareExtension" target */,
+			);
+			path = DocumentShareExtension;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		F431D9812FDBDD3D00C77928 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F431D9932FDBDD9600C77928 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -33,7 +90,9 @@
 			isa = PBXGroup;
 			children = (
 				F431D9862FDBDD3D00C77928 /* PasswordManager */,
+				F431D9972FDBDD9600C77928 /* DocumentShareExtension */,
 				F431D9852FDBDD3D00C77928 /* Products */,
+				F431D9A92FDBDF3600C77928 /* Shared */,
 			);
 			sourceTree = "<group>";
 		};
@@ -41,8 +100,17 @@
 			isa = PBXGroup;
 			children = (
 				F431D9842FDBDD3D00C77928 /* PasswordManager.app */,
+				F431D9962FDBDD9600C77928 /* DocumentShareExtension.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		F431D9A92FDBDF3600C77928 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				F431D9AA2FDBE02000C77928 /* AppGroupDBManager.swift */,
+			);
+			path = Shared;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -55,10 +123,12 @@
 				F431D9802FDBDD3D00C77928 /* Sources */,
 				F431D9812FDBDD3D00C77928 /* Frameworks */,
 				F431D9822FDBDD3D00C77928 /* Resources */,
+				F431D9A52FDBDD9700C77928 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				F431D99F2FDBDD9700C77928 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				F431D9862FDBDD3D00C77928 /* PasswordManager */,
@@ -69,6 +139,28 @@
 			productName = PasswordManager;
 			productReference = F431D9842FDBDD3D00C77928 /* PasswordManager.app */;
 			productType = "com.apple.product-type.application";
+		};
+		F431D9952FDBDD9600C77928 /* DocumentShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F431D9A22FDBDD9700C77928 /* Build configuration list for PBXNativeTarget "DocumentShareExtension" */;
+			buildPhases = (
+				F431D9922FDBDD9600C77928 /* Sources */,
+				F431D9932FDBDD9600C77928 /* Frameworks */,
+				F431D9942FDBDD9600C77928 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				F431D9972FDBDD9600C77928 /* DocumentShareExtension */,
+			);
+			name = DocumentShareExtension;
+			packageProductDependencies = (
+			);
+			productName = DocumentShareExtension;
+			productReference = F431D9962FDBDD9600C77928 /* DocumentShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -81,6 +173,9 @@
 				LastUpgradeCheck = 2650;
 				TargetAttributes = {
 					F431D9832FDBDD3D00C77928 = {
+						CreatedOnToolsVersion = 26.5;
+					};
+					F431D9952FDBDD9600C77928 = {
 						CreatedOnToolsVersion = 26.5;
 					};
 				};
@@ -100,12 +195,20 @@
 			projectRoot = "";
 			targets = (
 				F431D9832FDBDD3D00C77928 /* PasswordManager */,
+				F431D9952FDBDD9600C77928 /* DocumentShareExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		F431D9822FDBDD3D00C77928 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F431D9942FDBDD9600C77928 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -119,10 +222,27 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F431D9AB2FDBE02000C77928 /* AppGroupDBManager.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F431D9922FDBDD9600C77928 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F431D9AC2FDBE02100C77928 /* AppGroupDBManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		F431D99F2FDBDD9700C77928 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F431D9952FDBDD9600C77928 /* DocumentShareExtension */;
+			targetProxy = F431D99E2FDBDD9700C77928 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		F431D98D2FDBDD3E00C77928 /* Debug */ = {
@@ -251,6 +371,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = PasswordManager/PasswordManager.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = GBZWL4972J;
@@ -266,7 +387,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.xsn.PasswordManager;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sean.PasswordManager;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -283,6 +404,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = PasswordManager/PasswordManager.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = GBZWL4972J;
@@ -298,11 +420,69 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.xsn.PasswordManager;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sean.PasswordManager;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		F431D9A32FDBDD9700C77928 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = DocumentShareExtension/DocumentShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GBZWL4972J;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = DocumentShareExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = DocumentShareExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sean.PasswordManager.DocumentActionExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F431D9A42FDBDD9700C77928 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = DocumentShareExtension/DocumentShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GBZWL4972J;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = DocumentShareExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = DocumentShareExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sean.PasswordManager.DocumentActionExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
@@ -327,6 +507,15 @@
 			buildConfigurations = (
 				F431D9902FDBDD3E00C77928 /* Debug */,
 				F431D9912FDBDD3E00C77928 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F431D9A22FDBDD9700C77928 /* Build configuration list for PBXNativeTarget "DocumentShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F431D9A32FDBDD9700C77928 /* Debug */,
+				F431D9A42FDBDD9700C77928 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

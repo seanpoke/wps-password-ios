@@ -1,24 +1,60 @@
-//
-//  ContentView.swift
-//  PasswordManager
-//
-//  Created by Workstation on 6/11/26.
-//
-
 import SwiftUI
 
 struct ContentView: View {
+    @State private var testResultLog: String = "等待测试..."
+    @State private var isSuccess: Bool = false
+    
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+        VStack(spacing: 30) {
+            Image(systemName: "network")
+                .font(.system(size: 60))
+                .foregroundColor(.blue)
+            
+            Text("地下通道（第一阶段）测试")
+                .font(.title2)
+                .bold()
+            
+            Button(action: {
+                // 触发单向写入测试记录
+                AppGroupDBManager.shared.saveFileMapping(
+                    fileName: "TEST_DOC.DOCX",
+                    ldapUID: "LDAP_SEAN_999",
+                    passwordMock: "SecLink#2026"
+                )
+                
+                // 读取并刷新界面
+                let logs = AppGroupDBManager.shared.fetchAllLog()
+                withAnimation {
+                    testResultLog = logs
+                    isSuccess = true
+                }
+            }) {
+                Text("点击测试：单向写入加密资产")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(Color.blue)
+                    .cornerRadius(12)
+                    .padding(.horizontal, 40)
+            }
+            
+            // 结果展示墙
+            VStack(alignment: .leading, spacing: 10) {
+                Text("测试日志反馈：")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                
+                Text(testResultLog)
+                    .font(.body.monospaced())
+                    .foregroundColor(isSuccess ? .green : .primary)
+                    .padding()
+                    .frame(maxWidth: .infinity, minHeight: 80, alignment: .topLeading)
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(8)
+            }
+            .padding(.horizontal, 20)
         }
         .padding()
     }
-}
-
-#Preview {
-    ContentView()
 }
