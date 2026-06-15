@@ -45,7 +45,7 @@ final class AppGroupDBManager {
             return
         }
         guard sqlite3_open(self.dbPath, &db) == SQLITE_OK else {
-            dbLogger.error("❌ [DB] 无法打开数据库: \(self.dbPath)")
+            dbLogger.error("❌ [DB] 无法打开数据库: \(self.dbPath, privacy: .public)")
             return
         }
 
@@ -68,7 +68,7 @@ final class AppGroupDBManager {
             if let err = errMsg {
                 let error = String(cString: err)
                 sqlite3_free(errMsg)
-                dbLogger.error("SQLite pragma error: \(error)")
+                dbLogger.error("SQLite pragma error: \(error, privacy: .public)")
             }
         }
     }
@@ -141,7 +141,7 @@ final class AppGroupDBManager {
                     let changes = sqlite3_changes(db)
                     if changes > 0 {
                         let accessTime = queryLastAccessTime(forFileName: fileName)
-                        dbLogger.info("✅ [DB] 资产更新成功 | 文件: \(normalizedName) | last_access_time: \(accessTime ?? "N/A")")
+                        dbLogger.info("✅ [DB] 资产更新成功 | 文件: \(normalizedName, privacy: .public) | last_access_time: \(accessTime ?? "N/A", privacy: .public)")
                         return true
                     }
                 }
@@ -156,7 +156,7 @@ final class AppGroupDBManager {
                 
                 if result == SQLITE_DONE {
                     let accessTime = queryLastAccessTime(forFileName: fileName)
-                    dbLogger.info("✅ [DB] 资产插入成功 | 文件: \(normalizedName) | last_access_time: \(accessTime ?? "N/A")")
+                    dbLogger.info("✅ [DB] 资产插入成功 | 文件: \(normalizedName, privacy: .public) | last_access_time: \(accessTime ?? "N/A", privacy: .public)")
                     return true
                 }
             }
@@ -166,7 +166,7 @@ final class AppGroupDBManager {
             }
         }
         
-        dbLogger.error("❌ [DB] 资产写入失败 | 文件: \(normalizedName)")
+        dbLogger.error("❌ [DB] 资产写入失败 | 文件: \(normalizedName, privacy: .public)")
         return false
     }
     
@@ -188,7 +188,7 @@ final class AppGroupDBManager {
                     sqlite3_finalize(stmt)
                     let accessTime = queryLastAccessTime(forFileName: fileName)
                     let syncTime = queryLastSyncTime(forFileName: fileName)
-                    dbLogger.info("✅ [DB] 扩展同步成功 | 文件: \(normalizedName) | last_access_time: \(accessTime ?? "N/A") | last_sync_time: \(syncTime ?? "N/A")")
+                    dbLogger.info("✅ [DB] 扩展同步成功 | 文件: \(normalizedName, privacy: .public) | last_access_time: \(accessTime ?? "N/A", privacy: .public) | last_sync_time: \(syncTime ?? "N/A", privacy: .public)")
                     return true
                 } else if result == SQLITE_BUSY {
                     if attempt < 2 {
@@ -204,7 +204,7 @@ final class AppGroupDBManager {
             break
         }
 
-        dbLogger.error("❌ [DB] 扩展同步失败 | 文件: \(normalizedName)")
+        dbLogger.error("❌ [DB] 扩展同步失败 | 文件: \(normalizedName, privacy: .public)")
         return false
     }
     

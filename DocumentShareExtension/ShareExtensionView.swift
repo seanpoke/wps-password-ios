@@ -6,7 +6,7 @@ import OSLog
 let shareExtensionLogger = Logger(subsystem: "com.sean.PasswordManager", category: "ShareExtension")
 
 func forceLog(_ message: String) {
-    shareExtensionLogger.info("\(message)")
+    shareExtensionLogger.info("\(message, privacy: .public)")
 }
 
 @MainActor
@@ -598,7 +598,7 @@ struct ShareExtensionView: View {
         do {
             try FileManager.default.createDirectory(at: documentsDir, withIntermediateDirectories: true)
         } catch {
-            shareExtensionLogger.error("❌ 创建目录失败: \(error)")
+            shareExtensionLogger.error("❌ 创建目录失败: \(error, privacy: .public)")
             return nil
         }
         
@@ -640,7 +640,7 @@ struct ShareExtensionView: View {
                     }
                 }
             } catch {
-                shareExtensionLogger.error("❌ 清理临时目录失败: \(error)")
+                shareExtensionLogger.error("❌ 清理临时目录失败: \(error, privacy: .public)")
             }
         }
     }
