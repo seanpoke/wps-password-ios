@@ -1,5 +1,6 @@
 import UIKit
 import SwiftUI
+import OSLog
 
 class ShareViewController: UIViewController {
     

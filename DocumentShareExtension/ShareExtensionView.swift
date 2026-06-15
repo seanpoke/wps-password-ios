@@ -1,5 +1,13 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import Foundation
+import OSLog
+
+let shareExtensionLogger = Logger(subsystem: "com.sean.PasswordManager", category: "ShareExtension")
+
+func forceLog(_ message: String) {
+    shareExtensionLogger.info("\(message)")
+}
 
 @MainActor
 enum ActionState {
@@ -28,6 +36,7 @@ struct ShareExtensionView: View {
         self.extensionContext = extensionContext
         self.onDismiss = onDismiss
         self.onOpenIn = onOpenIn
+        forceLog("✅ [EXT] ShareExtensionView init | extensionContext: \(extensionContext != nil ? "有效" : "nil")")
     }
     
     var body: some View {
@@ -144,7 +153,15 @@ struct ShareExtensionView: View {
             }
             
             VStack(spacing: 16) {
-                Button(action: syncOverrideAction) {
+                Button(action: {
+                    forceLog("===== [SYNC OVERRIDE BUTTON CLICKED] =====")
+                    forceLog("⏰ 按钮点击时间: \(Date())")
+                    forceLog("📋 matchedAssetName: \(matchedAssetName)")
+                    forceLog("📋 detectedFileName: \(detectedFileName)")
+                    forceLog("📋 tempFilePath: \(tempFilePath?.path ?? "nil")")
+                    forceLog("==========================================")
+                    syncOverrideAction()
+                }) {
                     Text("确定同步覆盖")
                         .font(.headline)
                         .foregroundColor(.blue)
@@ -155,7 +172,11 @@ struct ShareExtensionView: View {
                         .shadow(radius: 8)
                 }
                 
-                Button(action: saveAsNewAction) {
+                Button(action: {
+                    forceLog("===== [SAVE AS NEW BUTTON CLICKED] =====")
+                    forceLog("⏰ 按钮点击时间: \(Date())")
+                    saveAsNewAction()
+                }) {
                     Text("另存为新文件")
                         .font(.headline)
                         .foregroundColor(.white)
@@ -175,36 +196,75 @@ struct ShareExtensionView: View {
             
             Spacer()
         }
+        .onAppear {
+            forceLog("===== [syncConfirmView 显示] =====")
+            forceLog("📊 matchedAssetName: \(matchedAssetName)")
+            forceLog("📊 detectedFileName: \(detectedFileName)")
+            forceLog("📊 tempFilePath: \(tempFilePath?.path ?? "nil")")
+            forceLog("==================================")
+        }
     }
     
     private func processIncomingFiles() async {
+        forceLog("🔄 [EXT] processIncomingFiles 开始")
+        
         guard let inputItems = extensionContext?.inputItems as? [NSExtensionItem] else {
+            forceLog("❌ [EXT] inputItems 为空")
             return
         }
         
-        for item in inputItems {
-            guard let attachments = item.attachments else { continue }
+        forceLog("📦 [EXT] 输入项数量: \(inputItems.count)")
+        
+        for (index, item) in inputItems.enumerated() {
+            guard let attachments = item.attachments else { 
+                forceLog("⚠️ [EXT] 第\(index)项没有附件")
+                continue 
+            }
             
-            for attachment in attachments {
+            forceLog("📎 [EXT] 第\(index)项附件数量: \(attachments.count)")
+            
+            for (attachIndex, attachment) in attachments.enumerated() {
+                forceLog("🔍 [EXT] 检查附件 \(attachIndex): \(attachment)")
+                
                 if attachment.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                    forceLog("✅ [EXT] 附件 \(attachIndex) 符合 fileURL 类型")
+                    
                     do {
-                        let url = try await attachment.loadItem(forTypeIdentifier: UTType.fileURL.identifier) as! URL
+                        forceLog("📥 [EXT] 开始加载附件 \(attachIndex)")
+                        let loadedItem = try await attachment.loadItem(forTypeIdentifier: UTType.fileURL.identifier)
+                        
+                        guard let url = loadedItem as? URL else {
+                            forceLog("❌ [EXT] 加载的项不是 URL: \(type(of: loadedItem))")
+                            continue
+                        }
+                        
+                        forceLog("📄 [EXT] 加载到 URL: \(url.path)")
+                        
                         let tempURL = try copyToTempInbox(sourceURL: url)
                         tempFilePath = tempURL
+                        
+                        forceLog("📁 [EXT] 临时文件路径: \(tempURL.path)")
                         
                         let correctedName = try detectAndCorrectFileExtension(fileURL: tempURL)
                         detectedFileName = correctedName
                         
+                        forceLog("📝 [EXT] 检测到文件名: \(correctedName)")
+                        
                         if checkAssetMatch(fileName: correctedName) {
                             matchedAssetName = correctedName
                             actionState = .syncConfirm
+                            forceLog("🔄 [EXT] 状态切换到 syncConfirm")
                         }
                     } catch {
-                        print("❌ 文件处理失败: \(error)")
+                        forceLog("❌ [EXT] 文件处理失败: \(error)")
                     }
+                } else {
+                    forceLog("⚠️ [EXT] 附件 \(attachIndex) 不符合 fileURL 类型")
                 }
             }
         }
+        
+        forceLog("✅ [EXT] processIncomingFiles 完成")
     }
     
     private func copyToTempInbox(sourceURL: URL) throws -> URL {
@@ -284,10 +344,15 @@ struct ShareExtensionView: View {
     
     private func checkAssetMatch(fileName: String) -> Bool {
         let normalizedName = fileName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if let _ = AppGroupDBManager.shared.queryUID(forFileName: normalizedName) {
+        forceLog("🔍 [EXT] 检查资产匹配: \(normalizedName)")
+        
+        if let uid = AppGroupDBManager.shared.queryUID(forFileName: normalizedName) {
+            forceLog("✅ [EXT] 找到匹配的资产 | UID: \(uid)")
             return true
+        } else {
+            forceLog("❌ [EXT] 未找到匹配的资产")
+            return false
         }
-        return false
     }
     
     private func confirmViewAction() {
@@ -312,23 +377,246 @@ struct ShareExtensionView: View {
     }
     
     private func syncOverrideAction() {
-        let normalizedName = detectedFileName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let success = AppGroupDBManager.shared.upsertRecord(fileName: normalizedName, uid: "LDAP_SEAN_999")
+        forceLog("🔄 [DEBUG] syncOverrideAction 开始执行")
         
-        if success {
-            print("✅ 资产同步成功")
+        guard let tempURL = tempFilePath, !detectedFileName.isEmpty else {
+            forceLog("❌ [DEBUG] 文件路径无效")
+            completeExtension(withError: "文件路径无效")
+            return
         }
-        onDismiss()
+        
+        let fileName = detectedFileName
+        let groupID = appGroupID
+        
+        forceLog("🔄 [测试日志反馈] 用户点击 [确定同步覆盖] | 目标文件: \(fileName)")
+        forceLog("📂 [测试日志反馈] 源文件路径: \(tempURL.path)")
+        forceLog("🔧 [DEBUG] 即将启动后台任务")
+        
+        Task.detached {
+            forceLog("🔧 [DEBUG] 后台任务已启动")
+            let startTime = Date()
+            let deadline = Date().addingTimeInterval(5)
+            
+            let task = Task { () -> Bool in
+                while Date() < deadline {
+                    guard !Task.isCancelled else {
+                        forceLog("⏹️ [测试日志反馈] 任务已取消")
+                        return false
+                    }
+                    
+                    let targetPath = Self.getSharedDocumentsPath(fileName: fileName, appGroupID: groupID)
+                    
+                    guard let targetURL = targetPath else {
+                        forceLog("❌ [测试日志反馈] 无法获取目标路径")
+                        return false
+                    }
+                    
+                    forceLog("📤 [测试日志反馈] 目标文件路径: \(targetURL.path)")
+                    
+                    do {
+                        let sourceSize = try FileManager.default.attributesOfItem(atPath: tempURL.path)[.size] as? Int64 ?? 0
+                        forceLog("📊 [测试日志反馈] 源文件大小: \(sourceSize) bytes")
+                        
+                        try Self.copyFileChunked(sourceURL: tempURL, targetURL: targetURL)
+                        forceLog("📥 [测试日志反馈] 文件分块复制完成")
+                        
+                        let targetSize = try FileManager.default.attributesOfItem(atPath: targetURL.path)[.size] as? Int64 ?? 0
+                        forceLog("📊 [测试日志反馈] 目标文件大小: \(targetSize) bytes")
+                        
+                        if sourceSize == targetSize {
+                            forceLog("✅ [测试日志反馈] 文件大小校验通过")
+                        } else {
+                            forceLog("⚠️ [测试日志反馈] 文件大小不一致! 源: \(sourceSize), 目标: \(targetSize)")
+                        }
+                        
+                        let normalizedName = fileName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                        let success = AppGroupDBManager.shared.upsertRecordWithSync(fileName: normalizedName, uid: "LDAP_SEAN_999")
+                        
+                        if success {
+                            let accessTime = AppGroupDBManager.shared.queryLastAccessTime(forFileName: fileName)
+                            let syncTime = AppGroupDBManager.shared.queryLastSyncTime(forFileName: fileName)
+                            forceLog("🕐 [测试日志反馈] last_access_time: \(accessTime ?? "N/A")")
+                            forceLog("🔄 [测试日志反馈] last_sync_time: \(syncTime ?? "N/A")")
+                        }
+                        
+                        return success
+                    } catch {
+                        forceLog("❌ [测试日志反馈] 文件覆盖失败: \(error)")
+                        return false
+                    }
+                }
+                forceLog("⏱️ [测试日志反馈] 处理超时 (5秒)")
+                return false
+            }
+            
+            let result = await task.value
+            let elapsed = Date().timeIntervalSince(startTime) * 1000
+            
+            forceLog("🔧 [DEBUG] 后台任务完成，结果: \(result)，耗时: \(elapsed)ms")
+            
+            await MainActor.run { [self] in
+                forceLog("🔧 [DEBUG] 回到主队列")
+                if result {
+                    forceLog("✅ [测试日志反馈] 资产同步覆盖成功 | 耗时: \(String(format: "%.2f", elapsed))ms")
+                    completeExtension()
+                } else {
+                    forceLog("❌ [测试日志反馈] 资产同步覆盖失败 | 耗时: \(String(format: "%.2f", elapsed))ms")
+                    completeExtension(withError: "处理超时，请重试")
+                }
+            }
+        }
+        
+        forceLog("🔧 [DEBUG] syncOverrideAction 方法返回")
     }
     
     private func saveAsNewAction() {
-        let url = URL(fileURLWithPath: detectedFileName)
-        let ext = url.pathExtension.isEmpty ? "" : ".\(url.pathExtension)"
-        let baseName = url.deletingPathExtension().lastPathComponent
-        let newName = "\(baseName)_copy\(ext)"
+        guard let tempURL = tempFilePath, !detectedFileName.isEmpty else {
+            completeExtension(withError: "文件路径无效")
+            return
+        }
         
-        AppGroupDBManager.shared.saveFileMapping(fileName: newName, ldapUID: "LDAP_SEAN_999", passwordMock: mockPassword)
-        onDismiss()
+        let fileName = detectedFileName
+        let groupID = appGroupID
+        
+        forceLog("➕ [测试日志反馈] 用户点击 [另存为新文件] | 原文件: \(fileName)")
+        
+        Task.detached {
+            let startTime = Date()
+            let deadline = Date().addingTimeInterval(5)
+            
+            let task = Task { () -> Bool in
+                while Date() < deadline {
+                    guard !Task.isCancelled else {
+                        forceLog("⏹️ [测试日志反馈] 任务已取消")
+                        return false
+                    }
+                    
+                    let url = URL(fileURLWithPath: fileName)
+                    let ext = url.pathExtension.isEmpty ? "" : ".\(url.pathExtension)"
+                    let baseName = url.deletingPathExtension().lastPathComponent
+                    let timestamp = String(Date().timeIntervalSince1970).prefix(10)
+                    let newName = "\(baseName)_sync_\(timestamp)\(ext)"
+                    
+                    forceLog("📝 [测试日志反馈] 新文件名: \(newName)")
+                    
+                    let targetPath = Self.getSharedDocumentsPath(fileName: newName, appGroupID: groupID)
+                    
+                    guard let targetURL = targetPath else {
+                        forceLog("❌ [测试日志反馈] 无法获取目标路径")
+                        return false
+                    }
+                    
+                    do {
+                        let sourceSize = try FileManager.default.attributesOfItem(atPath: tempURL.path)[.size] as? Int64 ?? 0
+                        forceLog("📊 [测试日志反馈] 源文件大小: \(sourceSize) bytes")
+                        
+                        try Self.copyFileChunked(sourceURL: tempURL, targetURL: targetURL)
+                        forceLog("📥 [测试日志反馈] 文件分块复制完成")
+                        
+                        let targetSize = try FileManager.default.attributesOfItem(atPath: targetURL.path)[.size] as? Int64 ?? 0
+                        forceLog("📊 [测试日志反馈] 新文件大小: \(targetSize) bytes")
+                        
+                        let normalizedName = newName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                        let success = AppGroupDBManager.shared.upsertRecord(fileName: normalizedName, uid: "LDAP_SEAN_999")
+                        
+                        if success {
+                            let accessTime = AppGroupDBManager.shared.queryLastAccessTime(forFileName: newName)
+                            forceLog("🕐 [测试日志反馈] last_access_time: \(accessTime ?? "N/A")")
+                        }
+                        
+                        return success
+                    } catch {
+                        forceLog("❌ [测试日志反馈] 文件另存失败: \(error)")
+                        return false
+                    }
+                }
+                forceLog("⏱️ [测试日志反馈] 处理超时 (5秒)")
+                return false
+            }
+            
+            let result = await task.value
+            let elapsed = Date().timeIntervalSince(startTime) * 1000
+            
+            await MainActor.run { [self] in
+                if result {
+                    forceLog("✅ [测试日志反馈] 新文件保存成功 | 耗时: \(String(format: "%.2f", elapsed))ms")
+                    completeExtension()
+                } else {
+                    forceLog("❌ [测试日志反馈] 新文件保存失败 | 耗时: \(String(format: "%.2f", elapsed))ms")
+                    completeExtension(withError: "处理超时，请重试")
+                }
+            }
+        }
+    }
+    
+    nonisolated private static func copyFileChunked(sourceURL: URL, targetURL: URL) throws {
+        let bufferSize = 8 * 1024 * 1024
+        
+        if FileManager.default.fileExists(atPath: targetURL.path) {
+            try FileManager.default.removeItem(at: targetURL)
+        }
+        
+        let inputHandle = try FileHandle(forReadingFrom: sourceURL)
+        defer { inputHandle.closeFile() }
+        
+        FileManager.default.createFile(atPath: targetURL.path, contents: nil)
+        let outputHandle = try FileHandle(forWritingTo: targetURL)
+        defer { outputHandle.closeFile() }
+        
+        var bytesRead = 0
+        
+        repeat {
+            try Task.checkCancellation()
+            
+            autoreleasepool {
+                do {
+                    let data = try inputHandle.read(upToCount: bufferSize)
+                    
+                    if let data = data, !data.isEmpty {
+                        try outputHandle.write(contentsOf: data)
+                        bytesRead = data.count
+                    } else {
+                        bytesRead = 0
+                    }
+                } catch {
+                    bytesRead = 0
+                }
+            }
+            
+        } while bytesRead > 0
+    }
+    
+    nonisolated private static func getSharedDocumentsPath(fileName: String, appGroupID: String) -> URL? {
+        guard let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: appGroupID
+        ) else {
+            return nil
+        }
+        
+        let documentsDir = containerURL.appendingPathComponent("Documents", isDirectory: true)
+        
+        do {
+            try FileManager.default.createDirectory(at: documentsDir, withIntermediateDirectories: true)
+        } catch {
+            shareExtensionLogger.error("❌ 创建目录失败: \(error)")
+            return nil
+        }
+        
+        return documentsDir.appendingPathComponent(fileName)
+    }
+    
+    private func completeExtension(withError errorMessage: String? = nil) {
+        if let error = errorMessage {
+            forceLog("❌ [扩展退出] 错误: \(error)")
+        }
+        
+        forceLog("👋 [扩展退出] 即将调用 completeRequest")
+        
+        extensionContext?.completeRequest(returningItems: [], completionHandler: { _ in
+            forceLog("✅ [扩展退出] completeRequest 调用完成")
+            self.cleanupTempDirectory()
+            self.onDismiss()
+        })
     }
     
     private func cancelAction() {
@@ -352,7 +640,7 @@ struct ShareExtensionView: View {
                     }
                 }
             } catch {
-                print("❌ 清理临时目录失败: \(error)")
+                shareExtensionLogger.error("❌ 清理临时目录失败: \(error)")
             }
         }
     }
