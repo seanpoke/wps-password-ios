@@ -10,6 +10,10 @@
 		F431D9A02FDBDD9700C77928 /* DocumentShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F431D9962FDBDD9600C77928 /* DocumentShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		F431D9AB2FDBE02000C77928 /* AppGroupDBManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F431D9AA2FDBE02000C77928 /* AppGroupDBManager.swift */; };
 		F431D9AC2FDBE02100C77928 /* AppGroupDBManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F431D9AA2FDBE02000C77928 /* AppGroupDBManager.swift */; };
+		F4BE62DA2FDFF1B400E709F3 /* ZipExtraFieldManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4BE62DB2FDFF1B400E709F3 /* ZipExtraFieldManager.swift */; };
+		F4BE62DC2FDFF1B500E709F3 /* ZipExtraFieldManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4BE62DB2FDFF1B400E709F3 /* ZipExtraFieldManager.swift */; };
+		F4BE62DD2FDFF1B600E709F3 /* OfficeCryptoVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4BE62DE2FDFF1B600E709F3 /* OfficeCryptoVerifier.swift */; };
+		F4BE62DF2FDFF1B700E709F3 /* OfficeCryptoVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4BE62DE2FDFF1B600E709F3 /* OfficeCryptoVerifier.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -40,6 +44,8 @@
 		F431D9842FDBDD3D00C77928 /* PasswordManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PasswordManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F431D9962FDBDD9600C77928 /* DocumentShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DocumentShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		F431D9AA2FDBE02000C77928 /* AppGroupDBManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroupDBManager.swift; sourceTree = "<group>"; };
+		F4BE62DB2FDFF1B400E709F3 /* ZipExtraFieldManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZipExtraFieldManager.swift; sourceTree = "<group>"; };
+		F4BE62DE2FDFF1B600E709F3 /* OfficeCryptoVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfficeCryptoVerifier.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -50,11 +56,21 @@
 			);
 			target = F431D9952FDBDD9600C77928 /* DocumentShareExtension */;
 		};
+		F4BE62D92FDFF1B300E709F3 /* Exceptions for "PasswordManager" folder in "PasswordManager" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = F431D9832FDBDD3D00C77928 /* PasswordManager */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		F431D9862FDBDD3D00C77928 /* PasswordManager */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F4BE62D92FDFF1B300E709F3 /* Exceptions for "PasswordManager" folder in "PasswordManager" target */,
+			);
 			path = PasswordManager;
 			sourceTree = "<group>";
 		};
@@ -109,6 +125,8 @@
 			isa = PBXGroup;
 			children = (
 				F431D9AA2FDBE02000C77928 /* AppGroupDBManager.swift */,
+				F4BE62DB2FDFF1B400E709F3 /* ZipExtraFieldManager.swift */,
+				F4BE62DE2FDFF1B600E709F3 /* OfficeCryptoVerifier.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -223,6 +241,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				F431D9AB2FDBE02000C77928 /* AppGroupDBManager.swift in Sources */,
+				F4BE62DA2FDFF1B400E709F3 /* ZipExtraFieldManager.swift in Sources */,
+				F4BE62DD2FDFF1B600E709F3 /* OfficeCryptoVerifier.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -231,6 +251,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				F431D9AC2FDBE02100C77928 /* AppGroupDBManager.swift in Sources */,
+				F4BE62DC2FDFF1B500E709F3 /* ZipExtraFieldManager.swift in Sources */,
+				F4BE62DF2FDFF1B700E709F3 /* OfficeCryptoVerifier.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -377,6 +399,8 @@
 				DEVELOPMENT_TEAM = GBZWL4972J;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PasswordManager/Info.plist;
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -410,6 +434,8 @@
 				DEVELOPMENT_TEAM = GBZWL4972J;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PasswordManager/Info.plist;
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
