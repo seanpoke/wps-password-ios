@@ -3,16 +3,27 @@ import UniformTypeIdentifiers
 import Foundation
 import OSLog
 
-let shareExtensionLogger = Logger(subsystem: "com.sean.PasswordManager", category: "ShareExtension")
+let shareExtensionLogger = Logger(subsystem: "com.greenet.PasswordManager", category: "ShareExtension")
 
 @MainActor
-enum ActionState {
+enum ActionState: CustomStringConvertible {
     case identifying
     case greenCanvas
     case yellowCanvas
     case blueCanvasA
     case blueCanvasB
     case stateD
+    
+    var description: String {
+        switch self {
+        case .identifying: return "identifying"
+        case .greenCanvas: return "greenCanvas"
+        case .yellowCanvas: return "yellowCanvas"
+        case .blueCanvasA: return "blueCanvasA"
+        case .blueCanvasB: return "blueCanvasB"
+        case .stateD: return "stateD"
+        }
+    }
 }
 
 @MainActor
@@ -32,6 +43,7 @@ struct ShareExtensionView: View {
     @State private var hostType: HostType = .unknown
     @State private var detectedFileName: String = ""
     @State private var tempFilePath: URL?
+    @State private var originalSourceURL: URL?
     @State private var matchedAssetName: String = ""
     @State private var matchedUID: String = ""
     @State private var capturedPassword: String = ""
@@ -44,7 +56,7 @@ struct ShareExtensionView: View {
     @State private var assetList: [FileMappingRecord] = []
     @State private var showAssetList: Bool = false
     
-    private let appGroupID = "group.com.sean.PasswordManager"
+    private let appGroupID = "group.com.greenet.PasswordManager"
     private let tempInboxDir = "Temp_Inbox"
     private let safeVaultDir = "SafeVault"
     
@@ -52,7 +64,8 @@ struct ShareExtensionView: View {
         self.extensionContext = extensionContext
         self.onDismiss = onDismiss
         self.onOpenIn = onOpenIn
-        shareExtensionLogger.info("✅ [EXT] ShareExtensionView init | extensionContext: \(extensionContext != nil ? "有效" : "nil")")
+        shareExtensionLogger.info("✅ [EXT] ===== ShareExtensionView 初始化 ===== ")
+        shareExtensionLogger.info("✅ [EXT] extensionContext: \(extensionContext != nil ? "有效" : "nil")")
     }
     
     var body: some View {
@@ -80,11 +93,18 @@ struct ShareExtensionView: View {
         }
         .edgesIgnoringSafeArea(.all)
         .onAppear {
+            shareExtensionLogger.info("✅ [EXT] ===== View onAppear 触发 ===== ")
             Task {
+                shareExtensionLogger.info("✅ [EXT] 开始执行 processIncomingFiles")
                 await processIncomingFiles()
+                shareExtensionLogger.info("✅ [EXT] processIncomingFiles 执行完毕，当前状态: \(actionState)")
             }
         }
+        .onChange(of: actionState) { newState in
+            shareExtensionLogger.info("🔄 [EXT] actionState 变更: \(newState)")
+        }
         .onDisappear {
+            shareExtensionLogger.info("✅ [EXT] ===== View onDisappear 触发 ===== ")
             cleanupTempDirectory()
         }
     }
@@ -474,26 +494,29 @@ struct ShareExtensionView: View {
             shareExtensionLogger.info("📎 [EXT] 第\(index)项附件数量: \(attachments.count)")
             
             for (attachIndex, attachment) in attachments.enumerated() {
-                shareExtensionLogger.info("🔍 [EXT] 检查附件 \(attachIndex): \(attachment)")
-                
-                if attachment.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-                    shareExtensionLogger.info("✅ [EXT] 附件 \(attachIndex) 符合 fileURL 类型")
+                    shareExtensionLogger.info("🔍 [EXT] 检查附件 \(attachIndex): \(attachment)")
+                    shareExtensionLogger.info("🔍 [EXT] 附件 \(attachIndex) 类型标识符: \(attachment.registeredTypeIdentifiers)")
                     
-                    do {
-                        shareExtensionLogger.info("📥 [EXT] 开始加载附件 \(attachIndex)")
-                        let loadedItem = try await attachment.loadItem(forTypeIdentifier: UTType.fileURL.identifier)
+                    if attachment.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                        shareExtensionLogger.info("✅ [EXT] 附件 \(attachIndex) 符合 fileURL 类型")
+                        
+                        do {
+                            shareExtensionLogger.info("📥 [EXT] 开始加载附件 \(attachIndex)")
+                            let loadedItem = try await attachment.loadItem(forTypeIdentifier: UTType.fileURL.identifier)
                         
                         guard let url = loadedItem as? URL else {
                             shareExtensionLogger.error("❌ [EXT] 加载的项不是 URL: \(type(of: loadedItem))")
                             continue
                         }
                         
-                        shareExtensionLogger.info("📄 [EXT] 加载到 URL: \(url.path)")
+                        shareExtensionLogger.info("📄 [EXT] 加载到 URL: \(url.path, privacy: .public)")
+                        
+                        originalSourceURL = url
                         
                         let tempURL = try copyToTempInbox(sourceURL: url)
                         tempFilePath = tempURL
                         
-                        shareExtensionLogger.info("📁 [EXT] 临时文件路径: \(tempURL.path)")
+                        shareExtensionLogger.info("📁 [EXT] 临时文件路径: \(tempURL.path, privacy: .public)")
                         
                         let fileAttributes = try FileManager.default.attributesOfItem(atPath: tempURL.path)
                         fileSize = fileAttributes[.size] as? Int64 ?? 0
@@ -502,9 +525,11 @@ struct ShareExtensionView: View {
                         let correctedName = try detectAndCorrectFileExtension(fileURL: tempURL)
                         detectedFileName = correctedName
                         
-                        shareExtensionLogger.info("📝 [EXT] 检测到文件名: \(correctedName)")
+                        shareExtensionLogger.info("📝 [EXT] 检测到文件名: \(correctedName, privacy: .public)")
                         
                         await determineHostType()
+                        let hostTypeName = hostType == .wps ? "WPS" : hostType == .external ? "外部" : "未知"
+                        shareExtensionLogger.info("🏠 [EXT] 判定宿主类型: \(hostTypeName, privacy: .public)")
                         await determineActionState(tempURL: tempURL, fileName: correctedName)
                         
                     } catch {
@@ -522,28 +547,45 @@ struct ShareExtensionView: View {
     private func determineHostType() async {
         hostType = .external
         
-        if let tempURL = tempFilePath {
-            let path = tempURL.path.lowercased()
+        if let sourceURL = originalSourceURL {
+            let path = sourceURL.path.lowercased()
+            shareExtensionLogger.info("🏠 [EXT] 原始来源路径: \(path, privacy: .public)")
             
             if path.contains("wps") || path.contains("kingsoft") {
                 hostType = .wps
                 shareExtensionLogger.info("🏠 [EXT] URL路径包含WPS特征，判定为WPS宿主")
             } else {
                 hostType = .external
-                shareExtensionLogger.info("🏠 [EXT] URL路径为外部来源: \(path)")
+                shareExtensionLogger.info("🏠 [EXT] URL路径为外部来源")
+            }
+        } else if let tempURL = tempFilePath {
+            let path = tempURL.path.lowercased()
+            shareExtensionLogger.info("🏠 [EXT] 备用路径(临时文件): \(path, privacy: .public)")
+            
+            if path.contains("wps") || path.contains("kingsoft") {
+                hostType = .wps
+                shareExtensionLogger.info("🏠 [EXT] 临时文件路径包含WPS特征，判定为WPS宿主")
+            } else {
+                hostType = .external
+                shareExtensionLogger.info("🏠 [EXT] 临时文件路径为外部来源")
             }
         } else {
             hostType = .external
-            shareExtensionLogger.info("🏠 [EXT] 无临时文件路径，默认判定为外部宿主")
+            shareExtensionLogger.info("🏠 [EXT] 无文件路径，默认判定为外部宿主")
         }
         
-        shareExtensionLogger.info("🏠 [EXT] 宿主类型: \(hostType == .wps ? "WPS" : "外部")")
+        let finalHostTypeName = hostType == .wps ? "WPS" : "外部"
+        shareExtensionLogger.info("🏠 [EXT] 最终宿主类型: \(finalHostTypeName, privacy: .public)")
     }
     
     private func determineActionState(tempURL: URL, fileName: String) async {
-        shareExtensionLogger.info("🔍 [EXT] 开始确定动作状态")
+        shareExtensionLogger.info("🔍 [EXT] ===== 开始确定动作状态 ===== ")
+        let actionHostTypeName = hostType == .wps ? "WPS" : "外部"
+        shareExtensionLogger.info("🔍 [EXT] 宿主类型: \(actionHostTypeName, privacy: .public)")
         
-        let hasMetadata = ZipExtraFieldManager.shared.readUid(from: tempURL) != nil
+        let uid = ZipExtraFieldManager.shared.readUid(from: tempURL)
+        shareExtensionLogger.info("🔍 [EXT] UID读取结果: \(uid ?? "nil", privacy: .public)")
+        let hasMetadata = uid != nil
         
         if hasMetadata {
             shareExtensionLogger.info("✅ [EXT] 检测到尾部存在元数据")
@@ -600,13 +642,19 @@ struct ShareExtensionView: View {
     }
     
     private func enterPath2(tempURL: URL, fileName: String) async {
+        shareExtensionLogger.info("🔄 [通路2] ===== 进入通路2：纯看未改 ===== ")
         if let uid = ZipExtraFieldManager.shared.readUid(from: tempURL) {
             shareExtensionLogger.info("🔄 [通路2] 提取到UID: \(uid)")
             
-            if let record = AppGroupDBManager.shared.queryRecordByUID(uid: uid) {
-                shareExtensionLogger.info("✅ [通路2] 数据库找到记录")
+            let record = AppGroupDBManager.shared.queryRecordByUID(uid: uid)
+            shareExtensionLogger.info("🔄 [通路2] 数据库查询结果: \(record != nil ? "找到记录" : "未找到记录")")
+            
+            if let record = record {
+                shareExtensionLogger.info("✅ [通路2] 数据库找到记录: \(record.file_name)")
                 matchedUID = uid
                 matchedAssetName = record.file_name
+                capturedPassword = record.password_hash
+                shareExtensionLogger.info("✅ [通路2] 设置密码: \(capturedPassword.prefix(8))...")
                 actionState = .blueCanvasA
             } else {
                 shareExtensionLogger.warning("⚠️ [通路2] 数据库无记录，降级到野生文件")
@@ -630,27 +678,29 @@ struct ShareExtensionView: View {
     }
     
     private func enterPath4(tempURL: URL, fileName: String) async {
-        shareExtensionLogger.info("🔄 [通路4] WPS写回，开始后台密码撞击")
+        shareExtensionLogger.info("🔄 [通路4] ===== 进入通路4：正常写回 ===== ")
+        shareExtensionLogger.info("🔄 [通路4] 开始后台密码撞击")
         
         isBruteForcing = true
         
         let task = Task.detached { () -> (FileMappingRecord?, String?) in
             let topRecords = AppGroupDBManager.shared.queryTopActiveRecords(limit: 5)
-            shareExtensionLogger.info("📋 [通路4] 获取前5条活跃记录")
+            shareExtensionLogger.info("📋 [通路4] 获取前\(topRecords.count)条活跃记录")
             
-            for record in topRecords {
-                shareExtensionLogger.info("🔐 [通路4] 尝试密码: \(record.password_hash.prefix(8))...")
+            for (index, record) in topRecords.enumerated() {
+                shareExtensionLogger.info("🔐 [通路4] 尝试密码 \(index+1)/\(topRecords.count): \(record.password_hash.prefix(8))...")
                 
                 let verificationResult = await self.verifyPassword(fileURL: tempURL, password: record.password_hash)
                 
                 if verificationResult {
-                    shareExtensionLogger.info("✅ [通路4] 密码撞击成功!")
+                    shareExtensionLogger.info("✅ [通路4] 密码撞击成功! 匹配记录: \(record.file_name)")
                     return (record, record.password_hash)
                 }
                 
                 shareExtensionLogger.info("❌ [通路4] 密码撞击失败")
             }
             
+            shareExtensionLogger.info("❌ [通路4] 所有\(topRecords.count)条密码均撞击失败")
             return (nil, nil)
         }
         
@@ -662,6 +712,7 @@ struct ShareExtensionView: View {
             matchedUID = record.uid
             matchedAssetName = record.file_name
             capturedPassword = password
+            shareExtensionLogger.info("✅ [通路4] 设置状态为 blueCanvasA")
             actionState = .blueCanvasA
         } else {
             shareExtensionLogger.warning("⚠️ [通路4] 所有密码撞击失败，降级到蓝色画布子态B")
@@ -937,10 +988,11 @@ struct ShareExtensionView: View {
                         
                         if let existingRecord = existingRecords.first {
                             let uid = existingRecord.uid
+                            let password = capturedPassword
                             shareExtensionLogger.info("🔄 [覆盖同名] 使用老UID: \(uid)")
                             
                             Task.detached {
-                                let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: capturedPassword)
+                                let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: password)
                                 
                                 if success {
                                     let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
@@ -991,11 +1043,12 @@ struct ShareExtensionView: View {
         
         let uid = record.uid
         let fileName = record.file_name
+        let password = capturedPassword
         
         shareExtensionLogger.info("🎯 [状态D] 选择资产: \(fileName) | UID: \(uid)")
         
         Task.detached {
-            let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: capturedPassword)
+            let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: password)
             
             if success {
                 let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)

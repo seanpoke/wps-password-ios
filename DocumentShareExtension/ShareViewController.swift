@@ -2,10 +2,13 @@ import UIKit
 import SwiftUI
 import OSLog
 
+let shareViewControllerLogger = Logger(subsystem: "com.greenet.PasswordManager", category: "ShareViewController")
+
 class ShareViewController: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
+        shareViewControllerLogger.info("✅ [SV] ===== ShareViewController viewDidLoad ===== ")
         
         let swiftUIView = ShareExtensionView(
             extensionContext: self.extensionContext,

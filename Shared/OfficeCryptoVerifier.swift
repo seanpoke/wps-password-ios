@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
 
-let cryptoLogger = Logger(subsystem: "com.sean.PasswordManager", category: "OfficeCrypto")
+let cryptoLogger = Logger(subsystem: "com.greenet.PasswordManager", category: "OfficeCrypto")
 
 enum CryptoError: Error, Equatable {
     case fileNotFound

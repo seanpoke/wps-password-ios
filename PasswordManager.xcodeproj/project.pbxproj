@@ -396,7 +396,7 @@
 				CODE_SIGN_ENTITLEMENTS = PasswordManager/PasswordManager.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = GBZWL4972J;
+				DEVELOPMENT_TEAM = K9L6V6797K;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PasswordManager/Info.plist;
@@ -411,7 +411,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.sean.PasswordManager;
+				PRODUCT_BUNDLE_IDENTIFIER = com.greenet.PasswordManager;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -431,7 +431,7 @@
 				CODE_SIGN_ENTITLEMENTS = PasswordManager/PasswordManager.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = GBZWL4972J;
+				DEVELOPMENT_TEAM = K9L6V6797K;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PasswordManager/Info.plist;
@@ -446,7 +446,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.sean.PasswordManager;
+				PRODUCT_BUNDLE_IDENTIFIER = com.greenet.PasswordManager;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -464,7 +464,7 @@
 				CODE_SIGN_ENTITLEMENTS = DocumentShareExtension/DocumentShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = GBZWL4972J;
+				DEVELOPMENT_TEAM = K9L6V6797K;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = DocumentShareExtension/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = DocumentShareExtension;
@@ -475,7 +475,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.sean.PasswordManager.DocumentActionExtension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.greenet.PasswordManager.DocumentShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -493,7 +493,7 @@
 				CODE_SIGN_ENTITLEMENTS = DocumentShareExtension/DocumentShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = GBZWL4972J;
+				DEVELOPMENT_TEAM = K9L6V6797K;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = DocumentShareExtension/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = DocumentShareExtension;
@@ -504,7 +504,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.sean.PasswordManager.DocumentActionExtension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.greenet.PasswordManager.DocumentShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

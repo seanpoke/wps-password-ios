@@ -1,7 +1,7 @@
 import SwiftUI
 import OSLog
 
-let appLogger = Logger(subsystem: "com.sean.PasswordManager", category: "MainApp")
+let appLogger = Logger(subsystem: "com.greenet.PasswordManager", category: "MainApp")
 
 @main
 struct PasswordManagerApp: App {
@@ -41,7 +41,7 @@ struct PasswordManagerApp: App {
     }
     
     private func cleanupExpiredTempFiles() async {
-        let appGroupID = "group.com.sean.PasswordManager"
+        let appGroupID = "group.com.greenet.PasswordManager"
         let tempInboxDir = "Temp_Inbox"
         let expirationInterval: TimeInterval = 24 * 60 * 60
         
@@ -94,7 +94,7 @@ struct PasswordManagerApp: App {
     }
     
     private func cleanupZombieIndexes() async {
-        let appGroupID = "group.com.sean.PasswordManager"
+        let appGroupID = "group.com.greenet.PasswordManager"
         let safeVaultDir = "SafeVault"
         
         guard let containerURL = FileManager.default.containerURL(
@@ -144,7 +144,7 @@ struct PasswordManagerApp: App {
     }
     
     private func cleanupLRUDiskSpace() async {
-        let appGroupID = "group.com.sean.PasswordManager"
+        let appGroupID = "group.com.greenet.PasswordManager"
         let safeVaultDir = "SafeVault"
         let maxDiskUsage: Int64 = 1 * 1024 * 1024 * 1024
         
@@ -241,7 +241,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     }
     
     private func performLaunchCleanup() async {
-        let appGroupID = "group.com.sean.PasswordManager"
+        let appGroupID = "group.com.greenet.PasswordManager"
         let tempInboxDir = "Temp_Inbox"
         let expirationInterval: TimeInterval = 24 * 60 * 60
         

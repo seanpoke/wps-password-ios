@@ -2,7 +2,7 @@ import Foundation
 import SQLite3
 import OSLog
 
-let dbLogger = Logger(subsystem: "com.sean.PasswordManager", category: "Database")
+let dbLogger = Logger(subsystem: "com.greenet.PasswordManager", category: "Database")
 
 struct FileMappingRecord {
     let uid: String
@@ -22,7 +22,7 @@ final class AppGroupDBManager {
 
     private init() {
         guard let containerURL = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: "group.com.sean.PasswordManager"
+            forSecurityApplicationGroupIdentifier: "group.com.greenet.PasswordManager"
         ) else {
             dbLogger.error("❌ [DB] App Group 容器获取失败，请检查 Capability 配置")
             self.dbPath = ""

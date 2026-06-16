@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
 
-let zipLogger = Logger(subsystem: "com.sean.PasswordManager", category: "ZipExtraField")
+let zipLogger = Logger(subsystem: "com.greenet.PasswordManager", category: "ZipExtraField")
 
 final class ZipExtraFieldManager {
     
