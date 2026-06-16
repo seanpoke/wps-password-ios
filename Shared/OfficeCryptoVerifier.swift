@@ -3,7 +3,7 @@ import OSLog
 
 let cryptoLogger = Logger(subsystem: "com.sean.PasswordManager", category: "OfficeCrypto")
 
-enum CryptoError: Error {
+enum CryptoError: Error, Equatable {
     case fileNotFound
     case fileTooLarge
     case invalidFormat
@@ -296,5 +296,7 @@ extension Thread {
         Thread.current.threadDictionary["isCancelled"] = true
     }
 }
+
+
 
 import CommonCrypto

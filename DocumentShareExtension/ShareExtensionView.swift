@@ -5,16 +5,21 @@ import OSLog
 
 let shareExtensionLogger = Logger(subsystem: "com.sean.PasswordManager", category: "ShareExtension")
 
-func forceLog(_ message: String) {
-    shareExtensionLogger.info("\(message, privacy: .public)")
-}
-
 @MainActor
 enum ActionState {
     case identifying
-    case syncConfirm
-    case passwordCapture
-    case assetList
+    case greenCanvas
+    case yellowCanvas
+    case blueCanvasA
+    case blueCanvasB
+    case stateD
+}
+
+@MainActor
+enum HostType {
+    case wps
+    case external
+    case unknown
 }
 
 struct ShareExtensionView: View {
@@ -24,23 +29,30 @@ struct ShareExtensionView: View {
     private let onOpenIn: (URL) -> Void
     
     @State private var actionState: ActionState = .identifying
+    @State private var hostType: HostType = .unknown
     @State private var detectedFileName: String = ""
-    @State private var countdownSeconds: Int = 0
-    @State private var isCountingDown: Bool = false
     @State private var tempFilePath: URL?
     @State private var matchedAssetName: String = ""
+    @State private var matchedUID: String = ""
     @State private var capturedPassword: String = ""
     @State private var isVerifying: Bool = false
     @State private var verificationError: String?
+    @State private var fileSize: Int64 = 0
+    @State private var isBruteForcing: Bool = false
+    @State private var hasPasswordInMetadata: Bool = false
+    
+    @State private var assetList: [FileMappingRecord] = []
+    @State private var showAssetList: Bool = false
     
     private let appGroupID = "group.com.sean.PasswordManager"
     private let tempInboxDir = "Temp_Inbox"
+    private let safeVaultDir = "SafeVault"
     
     init(extensionContext: NSExtensionContext?, onDismiss: @escaping () -> Void, onOpenIn: @escaping (URL) -> Void) {
         self.extensionContext = extensionContext
         self.onDismiss = onDismiss
         self.onOpenIn = onOpenIn
-        forceLog("✅ [EXT] ShareExtensionView init | extensionContext: \(extensionContext != nil ? "有效" : "nil")")
+        shareExtensionLogger.info("✅ [EXT] ShareExtensionView init | extensionContext: \(extensionContext != nil ? "有效" : "nil")")
     }
     
     var body: some View {
@@ -48,15 +60,21 @@ struct ShareExtensionView: View {
             switch actionState {
             case .identifying:
                 identifyingView
+                    .background(Color.gray)
+            case .greenCanvas:
+                greenCanvasView
                     .background(Color.green)
-            case .syncConfirm:
-                syncConfirmView
-                    .background(Color.blue)
-            case .passwordCapture:
-                passwordCaptureView
+            case .yellowCanvas:
+                yellowCanvasView
                     .background(Color.orange)
-            case .assetList:
-                assetListView
+            case .blueCanvasA:
+                blueCanvasSubAView
+                    .background(Color.blue)
+            case .blueCanvasB:
+                blueCanvasSubBView
+                    .background(Color.blue)
+            case .stateD:
+                stateDView
                     .background(Color.gray)
             }
         }
@@ -72,6 +90,27 @@ struct ShareExtensionView: View {
     }
     
     private var identifyingView: some View {
+        VStack(spacing: 40) {
+            Spacer()
+            
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                .scaleEffect(2)
+            
+            Text("正在识别文件...")
+                .font(.title)
+                .fontWeight(.bold)
+                .foregroundColor(.white)
+            
+            Text("检测到: \(detectedFileName)")
+                .font(.headline)
+                .foregroundColor(.white.opacity(0.9))
+            
+            Spacer()
+        }
+    }
+    
+    private var greenCanvasView: some View {
         VStack(spacing: 40) {
             Spacer()
             
@@ -95,30 +134,19 @@ struct ShareExtensionView: View {
                     .cornerRadius(12)
             }
             
-            if isCountingDown {
-                VStack(spacing: 8) {
-                    Text("密码已复制到剪贴板")
-                        .font(.subheadline)
-                        .foregroundColor(.white)
-                    
-                    Text("密码: \(capturedPassword)")
-                        .font(.title)
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(Color.black.opacity(0.3))
-                        .cornerRadius(8)
-                    
-                    Text("剩余 \(countdownSeconds) 秒")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                }
+            if hasPasswordInMetadata {
+                Text("密码: \(capturedPassword)")
+                    .font(.title)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.black.opacity(0.3))
+                    .cornerRadius(8)
             }
             
-            Button(action: confirmViewAction) {
-                Text("确认查看")
+            Button(action: copyPasswordAndExit) {
+                Text(hasPasswordInMetadata ? "复制密码并退场" : "当前文档无密码")
                     .font(.headline)
                     .foregroundColor(.green)
                     .padding()
@@ -138,84 +166,7 @@ struct ShareExtensionView: View {
         }
     }
     
-    private var syncConfirmView: some View {
-        VStack(spacing: 40) {
-            Spacer()
-            
-            Image(systemName: "arrow.triangle.2.circlepath")
-                .font(.system(size: 80))
-                .foregroundColor(.white)
-                .shadow(radius: 10)
-            
-            VStack(spacing: 16) {
-                Text("检测到回流资产")
-                    .font(.title)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
-                
-                Text("匹配到: \(matchedAssetName)")
-                    .font(.headline)
-                    .foregroundColor(.white.opacity(0.9))
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
-                    .background(Color.black.opacity(0.2))
-                    .cornerRadius(12)
-            }
-            
-            VStack(spacing: 16) {
-                Button(action: {
-                    forceLog("===== [SYNC OVERRIDE BUTTON CLICKED] =====")
-                    forceLog("⏰ 按钮点击时间: \(Date())")
-                    forceLog("📋 matchedAssetName: \(matchedAssetName)")
-                    forceLog("📋 detectedFileName: \(detectedFileName)")
-                    forceLog("📋 tempFilePath: \(tempFilePath?.path ?? "nil")")
-                    forceLog("==========================================")
-                    syncOverrideAction()
-                }) {
-                    Text("确定同步覆盖")
-                        .font(.headline)
-                        .foregroundColor(.blue)
-                        .padding()
-                        .frame(maxWidth: 280)
-                        .background(Color.white)
-                        .cornerRadius(16)
-                        .shadow(radius: 8)
-                }
-                
-                Button(action: {
-                    forceLog("===== [SAVE AS NEW BUTTON CLICKED] =====")
-                    forceLog("⏰ 按钮点击时间: \(Date())")
-                    saveAsNewAction()
-                }) {
-                    Text("另存为新文件")
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .padding()
-                        .frame(maxWidth: 280)
-                        .background(Color.white.opacity(0.2))
-                        .cornerRadius(16)
-                        .shadow(radius: 8)
-                }
-            }
-            
-            Button(action: cancelAction) {
-                Text("取消")
-                    .font(.body)
-                    .foregroundColor(.white.opacity(0.8))
-            }
-            
-            Spacer()
-        }
-        .onAppear {
-            forceLog("===== [syncConfirmView 显示] =====")
-            forceLog("📊 matchedAssetName: \(matchedAssetName)")
-            forceLog("📊 detectedFileName: \(detectedFileName)")
-            forceLog("📊 tempFilePath: \(tempFilePath?.path ?? "nil")")
-            forceLog("==================================")
-        }
-    }
-    
-    private var passwordCaptureView: some View {
+    private var yellowCanvasView: some View {
         VStack(spacing: 40) {
             Spacer()
             
@@ -225,7 +176,7 @@ struct ShareExtensionView: View {
                 .shadow(radius: 10)
             
             VStack(spacing: 16) {
-                Text("验证文件密码")
+                Text("登记新文件")
                     .font(.title)
                     .fontWeight(.bold)
                     .foregroundColor(.white)
@@ -260,13 +211,95 @@ struct ShareExtensionView: View {
                     .progressViewStyle(CircularProgressViewStyle(tint: .white))
                     .scaleEffect(2)
             } else {
-                Button(action: verifyAndRegisterAction) {
-                    Text("验证并保存")
+                VStack(spacing: 16) {
+                    Button(action: verifyAndRegisterAsNew) {
+                        Text("登记为本地新文件")
+                            .font(.headline)
+                            .foregroundColor(.orange)
+                            .padding()
+                            .frame(maxWidth: 280)
+                            .background(Color.white)
+                            .cornerRadius(16)
+                            .shadow(radius: 8)
+                    }
+                    
+                    Button(action: showAssetSelection) {
+                        Text("关联并覆盖本地已有文件")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .padding()
+                            .frame(maxWidth: 280)
+                            .background(Color.white.opacity(0.2))
+                            .cornerRadius(16)
+                            .shadow(radius: 8)
+                    }
+                }
+            }
+            
+            Button(action: cancelAction) {
+                Text("取消")
+                    .font(.body)
+                    .foregroundColor(.white.opacity(0.8))
+            }
+            
+            Spacer()
+        }
+    }
+    
+    private var blueCanvasSubAView: some View {
+        VStack(spacing: 40) {
+            Spacer()
+            
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.system(size: 80))
+                .foregroundColor(.white)
+                .shadow(radius: 10)
+            
+            VStack(spacing: 16) {
+                Text("检测到回流资产")
+                    .font(.title)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                
+                Text("匹配到: \(matchedAssetName)")
+                    .font(.headline)
+                    .foregroundColor(.white.opacity(0.9))
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Color.black.opacity(0.2))
+                    .cornerRadius(12)
+            }
+            
+            VStack(spacing: 16) {
+                Button(action: syncOverrideAction) {
+                    Text("确定同步覆盖")
                         .font(.headline)
-                        .foregroundColor(.orange)
+                        .foregroundColor(.blue)
                         .padding()
                         .frame(maxWidth: 280)
                         .background(Color.white)
+                        .cornerRadius(16)
+                        .shadow(radius: 8)
+                }
+                
+                Button(action: saveAsNewAction) {
+                    Text("另存为新文件")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .padding()
+                        .frame(maxWidth: 280)
+                        .background(Color.white.opacity(0.2))
+                        .cornerRadius(16)
+                        .shadow(radius: 8)
+                }
+                
+                Button(action: showAssetSelection) {
+                    Text("选择其他文件关联覆盖")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .padding()
+                        .frame(maxWidth: 280)
+                        .background(Color.white.opacity(0.15))
                         .cornerRadius(16)
                         .shadow(radius: 8)
                 }
@@ -282,106 +315,365 @@ struct ShareExtensionView: View {
         }
     }
     
-    private var assetListView: some View {
-        VStack(spacing: 20) {
+    private var blueCanvasSubBView: some View {
+        VStack(spacing: 40) {
             Spacer()
             
-            Image(systemName: "folder.fill")
+            Image(systemName: "lock.fill")
                 .font(.system(size: 80))
                 .foregroundColor(.white)
                 .shadow(radius: 10)
             
-            Text("资产列表")
+            VStack(spacing: 16) {
+                Text("密码撞击失败")
+                    .font(.title)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                
+                Text("检测到: \(detectedFileName)")
+                    .font(.headline)
+                    .foregroundColor(.white.opacity(0.9))
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Color.black.opacity(0.2))
+                    .cornerRadius(12)
+            }
+            
+            VStack(spacing: 16) {
+                SecureField("请输入最新密码", text: $capturedPassword)
+                    .font(.title)
+                    .foregroundColor(.white)
+                    .padding()
+                    .background(Color.black.opacity(0.3))
+                    .cornerRadius(12)
+                    .padding(.horizontal, 20)
+                
+                if let error = verificationError {
+                    Text(error)
+                        .font(.subheadline)
+                        .foregroundColor(.red)
+                }
+            }
+            
+            if isVerifying {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    .scaleEffect(2)
+            } else {
+                VStack(spacing: 16) {
+                    Button(action: overrideWithNewPassword) {
+                        Text("确定同步覆盖(同名老资产)")
+                            .font(.headline)
+                            .foregroundColor(.blue)
+                            .padding()
+                            .frame(maxWidth: 280)
+                            .background(Color.white)
+                            .cornerRadius(16)
+                            .shadow(radius: 8)
+                    }
+                    
+                    Button(action: verifyAndRegisterAsNew) {
+                        Text("登记为本地新文件")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .padding()
+                            .frame(maxWidth: 280)
+                            .background(Color.white.opacity(0.2))
+                            .cornerRadius(16)
+                            .shadow(radius: 8)
+                    }
+                    
+                    Button(action: showAssetSelection) {
+                        Text("关联并覆盖本地已有文件")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .padding()
+                            .frame(maxWidth: 280)
+                            .background(Color.white.opacity(0.15))
+                            .cornerRadius(16)
+                            .shadow(radius: 8)
+                    }
+                }
+            }
+            
+            Button(action: cancelAction) {
+                Text("取消")
+                    .font(.body)
+                    .foregroundColor(.white.opacity(0.8))
+            }
+            
+            Spacer()
+        }
+    }
+    
+    private var stateDView: some View {
+        VStack(spacing: 20) {
+            Spacer()
+            
+            Image(systemName: "folder.fill")
+                .font(.system(size: 60))
+                .foregroundColor(.white)
+                .shadow(radius: 10)
+            
+            Text("选择要覆盖的资产")
                 .font(.title)
                 .fontWeight(.bold)
                 .foregroundColor(.white)
             
             Spacer()
             
-            Button(action: cancelAction) {
-                Text("返回")
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    ForEach(assetList, id: \.uid) { record in
+                        Button(action: { selectAsset(record: record) }) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(record.file_name)
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                                Text("UID: \(record.uid.prefix(12))... | 大小: \(formatFileSize(record.file_size))")
+                                    .font(.subheadline)
+                                    .foregroundColor(.white.opacity(0.7))
+                            }
+                            .padding()
+                            .background(Color.white.opacity(0.2))
+                            .cornerRadius(12)
+                            .padding(.horizontal, 20)
+                        }
+                    }
+                }
+            }
+            
+            Spacer()
+            
+            Button(action: goBack) {
+                Text("返回上一步")
                     .font(.body)
                     .foregroundColor(.white.opacity(0.8))
             }
+            
+            Spacer()
         }
     }
     
     private func processIncomingFiles() async {
-        forceLog("🔄 [EXT] processIncomingFiles 开始")
+        shareExtensionLogger.info("🔄 [EXT] processIncomingFiles 开始")
         
         guard let inputItems = extensionContext?.inputItems as? [NSExtensionItem] else {
-            forceLog("❌ [EXT] inputItems 为空")
+            shareExtensionLogger.error("❌ [EXT] inputItems 为空")
             return
         }
         
-        forceLog("📦 [EXT] 输入项数量: \(inputItems.count)")
+        shareExtensionLogger.info("📦 [EXT] 输入项数量: \(inputItems.count)")
         
         for (index, item) in inputItems.enumerated() {
             guard let attachments = item.attachments else { 
-                forceLog("⚠️ [EXT] 第\(index)项没有附件")
+                shareExtensionLogger.warning("⚠️ [EXT] 第\(index)项没有附件")
                 continue 
             }
             
-            forceLog("📎 [EXT] 第\(index)项附件数量: \(attachments.count)")
+            shareExtensionLogger.info("📎 [EXT] 第\(index)项附件数量: \(attachments.count)")
             
             for (attachIndex, attachment) in attachments.enumerated() {
-                forceLog("🔍 [EXT] 检查附件 \(attachIndex): \(attachment)")
+                shareExtensionLogger.info("🔍 [EXT] 检查附件 \(attachIndex): \(attachment)")
                 
                 if attachment.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-                    forceLog("✅ [EXT] 附件 \(attachIndex) 符合 fileURL 类型")
+                    shareExtensionLogger.info("✅ [EXT] 附件 \(attachIndex) 符合 fileURL 类型")
                     
                     do {
-                        forceLog("📥 [EXT] 开始加载附件 \(attachIndex)")
+                        shareExtensionLogger.info("📥 [EXT] 开始加载附件 \(attachIndex)")
                         let loadedItem = try await attachment.loadItem(forTypeIdentifier: UTType.fileURL.identifier)
                         
                         guard let url = loadedItem as? URL else {
-                            forceLog("❌ [EXT] 加载的项不是 URL: \(type(of: loadedItem))")
+                            shareExtensionLogger.error("❌ [EXT] 加载的项不是 URL: \(type(of: loadedItem))")
                             continue
                         }
                         
-                        forceLog("📄 [EXT] 加载到 URL: \(url.path)")
+                        shareExtensionLogger.info("📄 [EXT] 加载到 URL: \(url.path)")
                         
                         let tempURL = try copyToTempInbox(sourceURL: url)
                         tempFilePath = tempURL
                         
-                        forceLog("📁 [EXT] 临时文件路径: \(tempURL.path)")
+                        shareExtensionLogger.info("📁 [EXT] 临时文件路径: \(tempURL.path)")
+                        
+                        let fileAttributes = try FileManager.default.attributesOfItem(atPath: tempURL.path)
+                        fileSize = fileAttributes[.size] as? Int64 ?? 0
+                        shareExtensionLogger.info("📐 [EXT] 文件大小: \(fileSize)")
                         
                         let correctedName = try detectAndCorrectFileExtension(fileURL: tempURL)
                         detectedFileName = correctedName
                         
-                        forceLog("📝 [EXT] 检测到文件名: \(correctedName)")
+                        shareExtensionLogger.info("📝 [EXT] 检测到文件名: \(correctedName)")
                         
+                        await determineHostType()
                         await determineActionState(tempURL: tempURL, fileName: correctedName)
                         
                     } catch {
-                        forceLog("❌ [EXT] 文件处理失败: \(error)")
+                        shareExtensionLogger.error("❌ [EXT] 文件处理失败: \(error)")
                     }
                 } else {
-                    forceLog("⚠️ [EXT] 附件 \(attachIndex) 不符合 fileURL 类型")
+                    shareExtensionLogger.warning("⚠️ [EXT] 附件 \(attachIndex) 不符合 fileURL 类型")
                 }
             }
         }
         
-        forceLog("✅ [EXT] processIncomingFiles 完成")
+        shareExtensionLogger.info("✅ [EXT] processIncomingFiles 完成")
+    }
+    
+    private func determineHostType() async {
+        hostType = .external
+        
+        if let tempURL = tempFilePath {
+            let path = tempURL.path.lowercased()
+            
+            if path.contains("wps") || path.contains("kingsoft") {
+                hostType = .wps
+                shareExtensionLogger.info("🏠 [EXT] URL路径包含WPS特征，判定为WPS宿主")
+            } else {
+                hostType = .external
+                shareExtensionLogger.info("🏠 [EXT] URL路径为外部来源: \(path)")
+            }
+        } else {
+            hostType = .external
+            shareExtensionLogger.info("🏠 [EXT] 无临时文件路径，默认判定为外部宿主")
+        }
+        
+        shareExtensionLogger.info("🏠 [EXT] 宿主类型: \(hostType == .wps ? "WPS" : "外部")")
     }
     
     private func determineActionState(tempURL: URL, fileName: String) async {
-        forceLog("🔍 [EXT] 开始确定动作状态")
+        shareExtensionLogger.info("🔍 [EXT] 开始确定动作状态")
         
-        if let uid = ZipExtraFieldManager.shared.readUid(from: tempURL) {
-            forceLog("✅ [EXT] 从文件尾部读出 UID: \(uid)")
+        let hasMetadata = ZipExtraFieldManager.shared.readUid(from: tempURL) != nil
+        
+        if hasMetadata {
+            shareExtensionLogger.info("✅ [EXT] 检测到尾部存在元数据")
             
-            if AppGroupDBManager.shared.queryUID(forFileName: fileName) != nil {
-                forceLog("✅ [EXT] UID 匹配数据库，进入同步确认状态")
-                matchedAssetName = fileName
-                actionState = .syncConfirm
+            if hostType == .wps {
+                shareExtensionLogger.info("🔄 [EXT] 宿主为WPS，进入通路2：纯看未改")
+                await enterPath2(tempURL: tempURL, fileName: fileName)
             } else {
-                forceLog("⚠️ [EXT] UID 存在但数据库无匹配，进入密码捕获状态")
-                actionState = .passwordCapture
+                shareExtensionLogger.info("🔑 [EXT] 宿主为外部，进入通路1：统一查密")
+                await enterPath1(tempURL: tempURL, fileName: fileName)
             }
         } else {
-            forceLog("❌ [EXT] 未读出 UID，进入密码捕获状态")
-            actionState = .passwordCapture
+            shareExtensionLogger.info("❌ [EXT] 检测到尾部无元数据")
+            
+            if hostType == .wps {
+                shareExtensionLogger.info("🔄 [EXT] 宿主为WPS，进入通路4：正常写回")
+                await enterPath4(tempURL: tempURL, fileName: fileName)
+            } else {
+                shareExtensionLogger.info("🌿 [EXT] 宿主为外部，进入通路3：野生文件")
+                await enterPath3(tempURL: tempURL, fileName: fileName)
+            }
+        }
+    }
+    
+    private func enterPath1(tempURL: URL, fileName: String) async {
+        if let uid = ZipExtraFieldManager.shared.readUid(from: tempURL) {
+            shareExtensionLogger.info("🔑 [通路1] 提取到UID: \(uid)")
+            
+            matchedUID = uid
+            
+            if let password = ZipExtraFieldManager.shared.readPassword(from: tempURL) {
+                shareExtensionLogger.info("✅ [通路1] 从元数据提取到密码: \(password.prefix(8))...")
+                capturedPassword = password
+                hasPasswordInMetadata = true
+            } else {
+                shareExtensionLogger.warning("⚠️ [通路1] 元数据中无密码")
+                capturedPassword = ""
+                hasPasswordInMetadata = false
+            }
+            
+            _ = AppGroupDBManager.shared.upsertRecord(
+                uid: uid,
+                fileName: fileName,
+                passwordHash: capturedPassword,
+                fileSize: fileSize,
+                isLocalVault: 0
+            )
+            
+            actionState = .greenCanvas
+        } else {
+            shareExtensionLogger.error("❌ [通路1] 无法提取UID，降级到野生文件")
+            await enterPath3(tempURL: tempURL, fileName: fileName)
+        }
+    }
+    
+    private func enterPath2(tempURL: URL, fileName: String) async {
+        if let uid = ZipExtraFieldManager.shared.readUid(from: tempURL) {
+            shareExtensionLogger.info("🔄 [通路2] 提取到UID: \(uid)")
+            
+            if let record = AppGroupDBManager.shared.queryRecordByUID(uid: uid) {
+                shareExtensionLogger.info("✅ [通路2] 数据库找到记录")
+                matchedUID = uid
+                matchedAssetName = record.file_name
+                actionState = .blueCanvasA
+            } else {
+                shareExtensionLogger.warning("⚠️ [通路2] 数据库无记录，降级到野生文件")
+                await enterPath3(tempURL: tempURL, fileName: fileName)
+            }
+        } else {
+            shareExtensionLogger.error("❌ [通路2] 无法提取UID，降级到通路4")
+            await enterPath4(tempURL: tempURL, fileName: fileName)
+        }
+    }
+    
+    private func enterPath3(tempURL: URL, fileName: String) async {
+        shareExtensionLogger.info("🌿 [通路3] 野生文件首次登记")
+        
+        let isGarbled = fileName.hasPrefix("~") || !fileName.contains(".")
+        if isGarbled {
+            shareExtensionLogger.info("📝 [通路3] 文件名乱码，已自动纠偏")
+        }
+        
+        actionState = .yellowCanvas
+    }
+    
+    private func enterPath4(tempURL: URL, fileName: String) async {
+        shareExtensionLogger.info("🔄 [通路4] WPS写回，开始后台密码撞击")
+        
+        isBruteForcing = true
+        
+        let task = Task.detached { () -> (FileMappingRecord?, String?) in
+            let topRecords = AppGroupDBManager.shared.queryTopActiveRecords(limit: 5)
+            shareExtensionLogger.info("📋 [通路4] 获取前5条活跃记录")
+            
+            for record in topRecords {
+                shareExtensionLogger.info("🔐 [通路4] 尝试密码: \(record.password_hash.prefix(8))...")
+                
+                let verificationResult = await self.verifyPassword(fileURL: tempURL, password: record.password_hash)
+                
+                if verificationResult {
+                    shareExtensionLogger.info("✅ [通路4] 密码撞击成功!")
+                    return (record, record.password_hash)
+                }
+                
+                shareExtensionLogger.info("❌ [通路4] 密码撞击失败")
+            }
+            
+            return (nil, nil)
+        }
+        
+        let (matchedRecord, foundPassword) = await task.value
+        
+        isBruteForcing = false
+        
+        if let record = matchedRecord, let password = foundPassword {
+            matchedUID = record.uid
+            matchedAssetName = record.file_name
+            capturedPassword = password
+            actionState = .blueCanvasA
+        } else {
+            shareExtensionLogger.warning("⚠️ [通路4] 所有密码撞击失败，降级到蓝色画布子态B")
+            actionState = .blueCanvasB
+        }
+    }
+    
+    private func verifyPassword(fileURL: URL, password: String) async -> Bool {
+        return await withCheckedContinuation { continuation in
+            OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: fileURL, password: password) { result in
+                continuation.resume(returning: result == .success(true))
+            }
         }
     }
     
@@ -460,7 +752,20 @@ struct ShareExtensionView: View {
         }
     }
     
-    private func verifyAndRegisterAction() {
+    private func copyPasswordAndExit() {
+        if hasPasswordInMetadata {
+            UIPasteboard.general.string = capturedPassword
+            shareExtensionLogger.info("✅ [剪贴板] 密码已复制")
+        }
+        
+        if !matchedUID.isEmpty {
+            _ = AppGroupDBManager.shared.updateAccessTime(uid: matchedUID)
+        }
+        
+        completeExtension()
+    }
+    
+    private func verifyAndRegisterAsNew() {
         guard !capturedPassword.isEmpty, let tempURL = tempFilePath else {
             verificationError = "请输入密码"
             return
@@ -493,21 +798,27 @@ struct ShareExtensionView: View {
             return
         }
         
-        let fileName = formatFileName(originalName: detectedFileName, isNewFile: true)
+        let fileName = detectedFileName
         let uid = generateUID()
         
-        forceLog("📝 [测试日志反馈] 开始登记新文件 | 文件名: \(fileName) | UID: \(uid)")
+        shareExtensionLogger.info("📝 [登记新文件] 文件名: \(fileName) | UID: \(uid)")
         
         Task.detached {
             let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: password)
             
             if success {
-                let moveSuccess = await moveToDocumentsDirectory(tempURL: tempURL, newFileName: fileName)
+                let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
                 
                 await MainActor.run {
                     if moveSuccess {
-                        AppGroupDBManager.shared.upsertRecord(fileName: fileName, uid: uid)
-                        forceLog("✅ [测试日志反馈] 新文件登记成功")
+                        _ = AppGroupDBManager.shared.saveFileMapping(
+                            fileName: fileName,
+                            uid: uid,
+                            passwordHash: password,
+                            fileSize: fileSize,
+                            isLocalVault: 1
+                        )
+                        shareExtensionLogger.info("✅ [登记新文件] 成功")
                         completeExtension()
                     } else {
                         completeExtension(withError: "文件迁移失败")
@@ -522,26 +833,32 @@ struct ShareExtensionView: View {
     }
     
     private func syncOverrideAction() {
-        guard let tempURL = tempFilePath, !detectedFileName.isEmpty else {
+        guard let tempURL = tempFilePath else {
             completeExtension(withError: "文件路径无效")
             return
         }
         
-        let fileName = detectedFileName
-        let uid = AppGroupDBManager.shared.queryUID(forFileName: fileName) ?? generateUID()
+        let fileName = matchedAssetName
+        let uid = matchedUID
         
-        forceLog("🔄 [测试日志反馈] 用户点击 [确定同步覆盖] | 目标文件: \(fileName) | UID: \(uid)")
+        shareExtensionLogger.info("🔄 [同步覆盖] 目标: \(fileName) | UID: \(uid)")
         
         Task.detached {
             let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: nil)
             
             if success {
-                let moveSuccess = await moveToDocumentsDirectory(tempURL: tempURL, newFileName: fileName)
+                let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
                 
                 await MainActor.run {
                     if moveSuccess {
-                        AppGroupDBManager.shared.upsertRecordWithSync(fileName: fileName, uid: uid)
-                        forceLog("✅ [测试日志反馈] 同步覆盖成功")
+                        _ = AppGroupDBManager.shared.saveFileMapping(
+                            fileName: fileName,
+                            uid: uid,
+                            passwordHash: capturedPassword,
+                            fileSize: fileSize,
+                            isLocalVault: 1
+                        )
+                        shareExtensionLogger.info("✅ [同步覆盖] 成功")
                         completeExtension()
                     } else {
                         completeExtension(withError: "文件迁移失败")
@@ -556,26 +873,36 @@ struct ShareExtensionView: View {
     }
     
     private func saveAsNewAction() {
-        guard let tempURL = tempFilePath, !detectedFileName.isEmpty else {
+        guard let tempURL = tempFilePath else {
             completeExtension(withError: "文件路径无效")
             return
         }
         
-        let newFileName = formatFileName(originalName: detectedFileName, isNewFile: false)
+        let baseName = URL(fileURLWithPath: detectedFileName).deletingPathExtension().lastPathComponent
+        let ext = URL(fileURLWithPath: detectedFileName).pathExtension.isEmpty ? "" : ".\(URL(fileURLWithPath: detectedFileName).pathExtension)"
+        let timestamp = String(Date().timeIntervalSince1970).prefix(10)
+        let newFileName = "\(baseName)_sync_\(timestamp)\(ext)"
+        
         let uid = generateUID()
         
-        forceLog("➕ [测试日志反馈] 用户点击 [另存为新文件] | 新文件名: \(newFileName) | UID: \(uid)")
+        shareExtensionLogger.info("➕ [另存为新文件] 新文件名: \(newFileName) | UID: \(uid)")
         
         Task.detached {
             let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: nil)
             
             if success {
-                let moveSuccess = await moveToDocumentsDirectory(tempURL: tempURL, newFileName: newFileName)
+                let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: newFileName)
                 
                 await MainActor.run {
                     if moveSuccess {
-                        AppGroupDBManager.shared.upsertRecord(fileName: newFileName, uid: uid)
-                        forceLog("✅ [测试日志反馈] 另存为新文件成功")
+                        _ = AppGroupDBManager.shared.saveFileMapping(
+                            fileName: newFileName,
+                            uid: uid,
+                            passwordHash: capturedPassword,
+                            fileSize: fileSize,
+                            isLocalVault: 1
+                        )
+                        shareExtensionLogger.info("✅ [另存为新文件] 成功")
                         completeExtension()
                     } else {
                         completeExtension(withError: "文件迁移失败")
@@ -589,24 +916,122 @@ struct ShareExtensionView: View {
         }
     }
     
-    private func formatFileName(originalName: String, isNewFile: Bool) -> String {
-        let url = URL(fileURLWithPath: originalName)
-        let ext = url.pathExtension.isEmpty ? "" : ".\(url.pathExtension)"
-        let baseName = url.deletingPathExtension().lastPathComponent
-        
-        if isNewFile {
-            return "🔒[企业资产]_\(baseName)\(ext)"
-        } else {
-            let timestamp = String(Date().timeIntervalSince1970).prefix(10)
-            return "🔒[企业资产]_\(baseName)_sync_\(timestamp)\(ext)"
+    private func overrideWithNewPassword() {
+        guard !capturedPassword.isEmpty, let tempURL = tempFilePath else {
+            verificationError = "请输入密码"
+            return
         }
+        
+        isVerifying = true
+        verificationError = nil
+        
+        OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: tempURL, password: capturedPassword) { result in
+            Task { @MainActor in
+                isVerifying = false
+                
+                switch result {
+                case .success(let verified):
+                    if verified {
+                        let fileName = detectedFileName
+                        let existingRecords = AppGroupDBManager.shared.queryRecordsByFileName(fileName: fileName)
+                        
+                        if let existingRecord = existingRecords.first {
+                            let uid = existingRecord.uid
+                            shareExtensionLogger.info("🔄 [覆盖同名] 使用老UID: \(uid)")
+                            
+                            Task.detached {
+                                let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: capturedPassword)
+                                
+                                if success {
+                                    let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
+                                    
+                                    await MainActor.run {
+                                        if moveSuccess {
+                                            _ = AppGroupDBManager.shared.saveFileMapping(
+                                                fileName: fileName,
+                                                uid: uid,
+                                                passwordHash: capturedPassword,
+                                                fileSize: self.fileSize,
+                                                isLocalVault: 1
+                                            )
+                                            self.completeExtension()
+                                        } else {
+                                            self.completeExtension(withError: "文件迁移失败")
+                                        }
+                                    }
+                                } else {
+                                    await MainActor.run {
+                                        self.completeExtension(withError: "写入标记失败")
+                                    }
+                                }
+                            }
+                        } else {
+                            registerNewFile(password: capturedPassword)
+                        }
+                    } else {
+                        verificationError = "密码验证失败，请重试"
+                    }
+                case .failure(let error):
+                    verificationError = error.localizedDescription
+                }
+            }
+        }
+    }
+    
+    private func showAssetSelection() {
+        assetList = AppGroupDBManager.shared.queryAllLocalVaultRecords()
+        actionState = .stateD
+    }
+    
+    private func selectAsset(record: FileMappingRecord) {
+        guard let tempURL = tempFilePath else {
+            completeExtension(withError: "文件路径无效")
+            return
+        }
+        
+        let uid = record.uid
+        let fileName = record.file_name
+        
+        shareExtensionLogger.info("🎯 [状态D] 选择资产: \(fileName) | UID: \(uid)")
+        
+        Task.detached {
+            let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: capturedPassword)
+            
+            if success {
+                let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
+                
+                await MainActor.run {
+                    if moveSuccess {
+                            _ = AppGroupDBManager.shared.saveFileMapping(
+                                fileName: fileName,
+                                uid: uid,
+                                passwordHash: capturedPassword,
+                                fileSize: self.fileSize,
+                                isLocalVault: 1
+                            )
+                            shareExtensionLogger.info("✅ [状态D] 覆盖成功")
+                        self.completeExtension()
+                    } else {
+                        self.completeExtension(withError: "文件迁移失败")
+                    }
+                }
+            } else {
+                await MainActor.run {
+                    self.completeExtension(withError: "写入标记失败")
+                }
+            }
+        }
+    }
+    
+    private func goBack() {
+        actionState = .yellowCanvas
     }
     
     private func generateUID() -> String {
         return "LDAP_\(UUID().uuidString.prefix(8).uppercased())"
     }
     
-    private func writeWppmMarkers(tempURL: URL, uid: String, password: String?) -> Bool {
+    private nonisolated func writeWppmMarkers(tempURL: URL, uid: String, password: String?) -> Bool {
         return ZipExtraFieldManager.shared.writeMetadata(
             to: tempURL,
             uid: uid,
@@ -615,10 +1040,19 @@ struct ShareExtensionView: View {
         )
     }
     
-    private func moveToDocumentsDirectory(tempURL: URL, newFileName: String) async -> Bool {
+    private func moveToSafeVault(tempURL: URL, newFileName: String) async -> Bool {
         do {
-            let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            var destURL = documentsURL.appendingPathComponent(newFileName)
+            guard let containerURL = FileManager.default.containerURL(
+                forSecurityApplicationGroupIdentifier: appGroupID
+            ) else {
+                shareExtensionLogger.error("❌ [迁移] 无法获取App Group容器")
+                return false
+            }
+            
+            let vaultDir = containerURL.appendingPathComponent(safeVaultDir, isDirectory: true)
+            try FileManager.default.createDirectory(at: vaultDir, withIntermediateDirectories: true)
+            
+            var destURL = vaultDir.appendingPathComponent(newFileName)
             
             if FileManager.default.fileExists(atPath: destURL.path) {
                 try FileManager.default.removeItem(at: destURL)
@@ -635,61 +1069,44 @@ struct ShareExtensionView: View {
                     resourceValues.isExcludedFromBackup = true
                     try destURL.setResourceValues(resourceValues)
                     
-                    forceLog("✅ [测试日志反馈] 文件迁移成功: \(destURL.path)")
+                    shareExtensionLogger.info("✅ [迁移] 文件迁移成功: \(destURL.path)")
                 } catch {
-                    forceLog("❌ [测试日志反馈] 文件迁移失败: \(error)")
+                    shareExtensionLogger.error("❌ [迁移] 文件迁移失败: \(error)")
                 }
             }
             
             if let error = error {
-                forceLog("❌ [测试日志反馈] 文件协调失败: \(error)")
+                shareExtensionLogger.error("❌ [迁移] 文件协调失败: \(error)")
                 return false
             }
             
             return FileManager.default.fileExists(atPath: destURL.path)
             
         } catch {
-            forceLog("❌ [测试日志反馈] 文件迁移异常: \(error)")
+            shareExtensionLogger.error("❌ [迁移] 文件迁移异常: \(error)")
             return false
         }
     }
     
-    private func confirmViewAction() {
-        if let password = ZipExtraFieldManager.shared.readPassword(from: tempFilePath!) {
-            capturedPassword = password
+    private func formatFileSize(_ bytes: Int64) -> String {
+        if bytes < 1024 {
+            return "\(bytes) B"
+        } else if bytes < 1024 * 1024 {
+            return String(format: "%.1f KB", Double(bytes) / 1024)
         } else {
-            capturedPassword = "SecLink#2026"
-        }
-        
-        UIPasteboard.general.string = capturedPassword
-        isCountingDown = true
-        countdownSeconds = 60
-        
-        Task {
-            while countdownSeconds > 0 {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                countdownSeconds -= 1
-            }
-            UIPasteboard.general.string = nil
-            isCountingDown = false
-            
-            if let url = tempFilePath {
-                onOpenIn(url)
-            } else {
-                onDismiss()
-            }
+            return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
         }
     }
     
     private func completeExtension(withError errorMessage: String? = nil) {
         if let error = errorMessage {
-            forceLog("❌ [扩展退出] 错误: \(error)")
+            shareExtensionLogger.error("❌ [扩展退出] 错误: \(error)")
         }
         
-        forceLog("👋 [扩展退出] 即将调用 completeRequest")
+        shareExtensionLogger.info("👋 [扩展退出] 即将调用 completeRequest")
         
         extensionContext?.completeRequest(returningItems: [], completionHandler: { _ in
-            forceLog("✅ [扩展退出] completeRequest 调用完成")
+            shareExtensionLogger.info("✅ [扩展退出] completeRequest 调用完成")
             self.cleanupTempDirectory()
             self.onDismiss()
         })

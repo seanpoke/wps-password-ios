@@ -15,14 +15,15 @@ struct ContentView: View {
                 .bold()
             
             Button(action: {
-                // 触发单向写入测试记录
+                let passwordHash = "SecLink#2026".sha256().map { String(format: "%02X", $0) }.joined()
                 AppGroupDBManager.shared.saveFileMapping(
                     fileName: "TEST_DOC.DOCX",
-                    ldapUID: "LDAP_SEAN_999",
-                    passwordMock: "SecLink#2026"
+                    uid: "LDAP_SEAN_999",
+                    passwordHash: passwordHash,
+                    fileSize: 102400,
+                    isLocalVault: 1
                 )
                 
-                // 读取并刷新界面
                 let logs = AppGroupDBManager.shared.fetchAllLog()
                 withAnimation {
                     testResultLog = logs
@@ -39,7 +40,6 @@ struct ContentView: View {
                     .padding(.horizontal, 40)
             }
             
-            // 结果展示墙
             VStack(alignment: .leading, spacing: 10) {
                 Text("测试日志反馈：")
                     .font(.caption)
@@ -58,3 +58,5 @@ struct ContentView: View {
         .padding()
     }
 }
+
+import CommonCrypto

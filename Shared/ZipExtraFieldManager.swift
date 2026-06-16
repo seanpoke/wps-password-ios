@@ -82,7 +82,10 @@ final class ZipExtraFieldManager {
             let slice = buffer.subdata(in: i..<i+signatureLength)
             if slice == magic {
                 let absolutePosition = startOffset + Int64(i)
-                return parseMarker(at: absolutePosition, in: buffer, relativeOffset: i, expectedType: expectedType)
+                if let result = parseMarker(at: absolutePosition, in: buffer, relativeOffset: i, expectedType: expectedType) {
+                    return result
+                }
+                zipLogger.debug("🔍 [搜索标记] 类型不匹配，继续向前搜索，当前偏移: \(i)")
             }
         }
         
@@ -114,7 +117,7 @@ final class ZipExtraFieldManager {
         zipLogger.debug("🔍 [解析标记] Type: 0x\(String(format: "%02X", typeByte)) (\(typeName))")
         
         if typeByte != expectedType {
-            zipLogger.debug("❌ Type 不匹配: 期望 0x\(String(format: "%02X", expectedType))，实际 0x\(String(format: "%02X", typeByte))")
+            zipLogger.debug("🔍 [解析标记] Type 不匹配: 期望 0x\(String(format: "%02X", expectedType)) (\(self.typeNameFromByte(expectedType)))，实际 0x\(String(format: "%02X", typeByte)) (\(typeName))，继续向前搜索")
             return nil
         }
         
