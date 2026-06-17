@@ -824,7 +824,13 @@ struct ShareExtensionView: View {
     }
     
     private func verifyAndRegisterAsNew() {
+        shareExtensionLogger.info("🔑 [登记新文件] verifyAndRegisterAsNew 被调用")
+        shareExtensionLogger.info("🔑 [登记新文件] 输入密码长度: \(capturedPassword.count)")
+        shareExtensionLogger.info("🔑 [登记新文件] 输入密码内容: \(capturedPassword)")
+        shareExtensionLogger.info("🔑 [登记新文件] tempFilePath: \(tempFilePath?.path ?? "nil")")
+        
         guard !capturedPassword.isEmpty, let tempURL = tempFilePath else {
+            shareExtensionLogger.error("❌ [登记新文件] 参数无效: 密码为空=\(capturedPassword.isEmpty), 文件路径为nil=\(tempFilePath == nil)")
             verificationError = "请输入密码"
             return
         }
@@ -832,26 +838,45 @@ struct ShareExtensionView: View {
         isVerifying = true
         verificationError = nil
         
+        shareExtensionLogger.info("🔑 [登记新文件] 开始密码验证，文件: \(tempURL.lastPathComponent)")
+        
         OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: tempURL, password: capturedPassword) { result in
-            Task { @MainActor in
-                isVerifying = false
+            
+            let resultDescription: String
+            switch result {
+            case .success(let value):
+                resultDescription = "success(\(value))"
+            case .failure(let error):
+                resultDescription = "failure(\(error.localizedDescription))"
+            }
+            shareExtensionLogger.info("🔑 [登记新文件] 密码验证回调返回: \(resultDescription)")
+            
+            DispatchQueue.main.async {
+                self.isVerifying = false
                 
                 switch result {
                 case .success(let verified):
                     if verified {
-                        registerNewFile(password: capturedPassword)
+                        shareExtensionLogger.info("✅ [登记新文件] 密码验证通过，开始注册")
+                        self.registerNewFile(password: self.capturedPassword)
                     } else {
-                        verificationError = "密码验证失败，请重试"
+                        shareExtensionLogger.warning("⚠️ [登记新文件] 密码验证失败")
+                        self.verificationError = "密码验证失败，请重试"
                     }
                 case .failure(let error):
-                    verificationError = error.localizedDescription
+                    shareExtensionLogger.error("❌ [登记新文件] 密码验证异常: \(error.localizedDescription)")
+                    self.verificationError = error.localizedDescription
                 }
             }
         }
     }
     
     private func registerNewFile(password: String) {
+        shareExtensionLogger.info("📝 [登记新文件] registerNewFile 被调用")
+        shareExtensionLogger.info("📝 [登记新文件] 密码长度: \(password.count)")
+        
         guard let tempURL = tempFilePath else {
+            shareExtensionLogger.error("❌ [登记新文件] 文件路径无效")
             completeExtension(withError: "文件路径无效")
             return
         }
@@ -861,32 +886,90 @@ struct ShareExtensionView: View {
         
         shareExtensionLogger.info("📝 [登记新文件] 文件名: \(fileName) | UID: \(uid)")
         
-        Task.detached {
-            let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: password)
+        shareExtensionLogger.info("📝 [登记新文件] 开始写入 WPPM 标记")
+        let writeSuccess = writeWppmMarkers(tempURL: tempURL, uid: uid, password: password)
+        shareExtensionLogger.info("📝 [登记新文件] WPPM 标记写入结果: \(writeSuccess)")
+        
+        if writeSuccess {
+            shareExtensionLogger.info("📝 [登记新文件] 开始迁移到保险箱")
+            let moveSuccess = moveToSafeVaultSync(tempURL: tempURL, newFileName: fileName)
+            shareExtensionLogger.info("📝 [登记新文件] 迁移结果: \(moveSuccess)")
             
-            if success {
-                let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
+            if moveSuccess {
+                shareExtensionLogger.info("📝 [登记新文件] 开始保存数据库记录")
+                let dbSuccess = AppGroupDBManager.shared.saveFileMapping(
+                    fileName: fileName,
+                    uid: uid,
+                    passwordHash: password,
+                    fileSize: fileSize,
+                    isLocalVault: 1
+                )
+                shareExtensionLogger.info("📝 [登记新文件] 数据库保存结果: \(dbSuccess)")
                 
-                await MainActor.run {
-                    if moveSuccess {
-                        _ = AppGroupDBManager.shared.saveFileMapping(
-                            fileName: fileName,
-                            uid: uid,
-                            passwordHash: password,
-                            fileSize: fileSize,
-                            isLocalVault: 1
-                        )
-                        shareExtensionLogger.info("✅ [登记新文件] 成功")
-                        completeExtension()
-                    } else {
-                        completeExtension(withError: "文件迁移失败")
-                    }
+                if dbSuccess {
+                    shareExtensionLogger.info("✅ [登记新文件] 所有步骤成功完成")
+                    completeExtension()
+                } else {
+                    shareExtensionLogger.error("❌ [登记新文件] 数据库保存失败")
+                    completeExtension(withError: "数据库保存失败")
                 }
             } else {
-                await MainActor.run {
-                    completeExtension(withError: "写入标记失败")
+                shareExtensionLogger.error("❌ [登记新文件] 文件迁移失败")
+                completeExtension(withError: "文件迁移失败")
+            }
+        } else {
+            shareExtensionLogger.error("❌ [登记新文件] WPPM 标记写入失败")
+            completeExtension(withError: "写入标记失败")
+        }
+    }
+    
+    private func moveToSafeVaultSync(tempURL: URL, newFileName: String) -> Bool {
+        do {
+            guard let containerURL = FileManager.default.containerURL(
+                forSecurityApplicationGroupIdentifier: appGroupID
+            ) else {
+                shareExtensionLogger.error("❌ [迁移同步] 无法获取App Group容器")
+                return false
+            }
+            
+            let vaultDir = containerURL.appendingPathComponent(safeVaultDir, isDirectory: true)
+            try FileManager.default.createDirectory(at: vaultDir, withIntermediateDirectories: true)
+            
+            var destURL = vaultDir.appendingPathComponent(newFileName)
+            
+            if FileManager.default.fileExists(atPath: destURL.path) {
+                try FileManager.default.removeItem(at: destURL)
+            }
+            
+            let coordinator = NSFileCoordinator()
+            var error: NSError?
+            var moveCompleted = false
+            
+            coordinator.coordinate(writingItemAt: tempURL, options: .forMoving, error: &error) { newURL in
+                do {
+                    try FileManager.default.moveItem(at: newURL, to: destURL)
+                    
+                    var resourceValues = URLResourceValues()
+                    resourceValues.isExcludedFromBackup = true
+                    try destURL.setResourceValues(resourceValues)
+                    
+                    shareExtensionLogger.info("✅ [迁移同步] 文件迁移成功: \(destURL.path)")
+                    moveCompleted = true
+                } catch {
+                    shareExtensionLogger.error("❌ [迁移同步] 文件迁移失败: \(error)")
                 }
             }
+            
+            if let error = error {
+                shareExtensionLogger.error("❌ [迁移同步] 文件协调失败: \(error)")
+                return false
+            }
+            
+            return moveCompleted && FileManager.default.fileExists(atPath: destURL.path)
+            
+        } catch {
+            shareExtensionLogger.error("❌ [迁移同步] 文件迁移异常: \(error)")
+            return false
         }
     }
     
