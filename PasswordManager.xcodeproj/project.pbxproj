@@ -14,6 +14,8 @@
 		F4BE62DC2FDFF1B500E709F3 /* ZipExtraFieldManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4BE62DB2FDFF1B400E709F3 /* ZipExtraFieldManager.swift */; };
 		F4BE62DD2FDFF1B600E709F3 /* OfficeCryptoVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4BE62DE2FDFF1B600E709F3 /* OfficeCryptoVerifier.swift */; };
 		F4BE62DF2FDFF1B700E709F3 /* OfficeCryptoVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4BE62DE2FDFF1B600E709F3 /* OfficeCryptoVerifier.swift */; };
+		F4C000012FE0000000E709F3 /* UidGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4C000002FE0000000E709F3 /* UidGenerator.swift */; };
+		F4C000022FE0000100E709F3 /* UidGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4C000002FE0000000E709F3 /* UidGenerator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -46,6 +48,7 @@
 		F431D9AA2FDBE02000C77928 /* AppGroupDBManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroupDBManager.swift; sourceTree = "<group>"; };
 		F4BE62DB2FDFF1B400E709F3 /* ZipExtraFieldManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZipExtraFieldManager.swift; sourceTree = "<group>"; };
 		F4BE62DE2FDFF1B600E709F3 /* OfficeCryptoVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfficeCryptoVerifier.swift; sourceTree = "<group>"; };
+		F4C000002FE0000000E709F3 /* UidGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UidGenerator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -127,6 +130,7 @@
 				F431D9AA2FDBE02000C77928 /* AppGroupDBManager.swift */,
 				F4BE62DB2FDFF1B400E709F3 /* ZipExtraFieldManager.swift */,
 				F4BE62DE2FDFF1B600E709F3 /* OfficeCryptoVerifier.swift */,
+				F4C000002FE0000000E709F3 /* UidGenerator.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -243,6 +247,7 @@
 				F431D9AB2FDBE02000C77928 /* AppGroupDBManager.swift in Sources */,
 				F4BE62DA2FDFF1B400E709F3 /* ZipExtraFieldManager.swift in Sources */,
 				F4BE62DD2FDFF1B600E709F3 /* OfficeCryptoVerifier.swift in Sources */,
+				F4C000012FE0000000E709F3 /* UidGenerator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -253,6 +258,7 @@
 				F431D9AC2FDBE02100C77928 /* AppGroupDBManager.swift in Sources */,
 				F4BE62DC2FDFF1B500E709F3 /* ZipExtraFieldManager.swift in Sources */,
 				F4BE62DF2FDFF1B700E709F3 /* OfficeCryptoVerifier.swift in Sources */,
+				F4C000022FE0000100E709F3 /* UidGenerator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

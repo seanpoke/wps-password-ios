@@ -53,5 +53,5 @@ Thumbs.db
 # Archives
 *.xcarchive
 
-# Local docs folder
-/docs/
+# Local log folder
+/.log/

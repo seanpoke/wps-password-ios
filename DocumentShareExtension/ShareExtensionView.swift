@@ -345,22 +345,28 @@ struct ShareExtensionView: View {
                 .shadow(radius: 10)
             
             VStack(spacing: 16) {
-                Text("密码撞击失败")
+                Text(matchedUID.isEmpty ? "密码撞击失败" : "需要验证身份")
                     .font(.title)
                     .fontWeight(.bold)
                     .foregroundColor(.white)
                 
-                Text("检测到: \(detectedFileName)")
+                Text(matchedUID.isEmpty ? "检测到: \(detectedFileName)" : "检测到身份标识: \(detectedFileName)")
                     .font(.headline)
                     .foregroundColor(.white.opacity(0.9))
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
                     .background(Color.black.opacity(0.2))
                     .cornerRadius(12)
+                
+                if !matchedUID.isEmpty {
+                    Text("文件携带身份标识，正在验证...")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.7))
+                }
             }
             
             VStack(spacing: 16) {
-                SecureField("请输入最新密码", text: $capturedPassword)
+                SecureField(matchedUID.isEmpty ? "请输入最新密码" : "请输入文件密码", text: $capturedPassword)
                     .font(.title)
                     .foregroundColor(.white)
                     .padding()
@@ -382,7 +388,7 @@ struct ShareExtensionView: View {
             } else {
                 VStack(spacing: 16) {
                     Button(action: overrideWithNewPassword) {
-                        Text("确定同步覆盖(同名老资产)")
+                        Text(matchedUID.isEmpty ? "确定同步覆盖(同名老资产)" : "确认登记并保留身份")
                             .font(.headline)
                             .foregroundColor(.blue)
                             .padding()
@@ -657,8 +663,9 @@ struct ShareExtensionView: View {
                 shareExtensionLogger.info("✅ [通路2] 设置密码: \(capturedPassword.prefix(8))...")
                 actionState = .blueCanvasA
             } else {
-                shareExtensionLogger.warning("⚠️ [通路2] 数据库无记录，降级到野生文件")
-                await enterPath3(tempURL: tempURL, fileName: fileName)
+                shareExtensionLogger.warning("⚠️ [通路2] 数据库无记录，降级到蓝色画布B，保留文件原有UID")
+                matchedUID = uid
+                actionState = .blueCanvasB
             }
         } else {
             shareExtensionLogger.error("❌ [通路2] 无法提取UID，降级到通路4")
@@ -850,7 +857,7 @@ struct ShareExtensionView: View {
         }
         
         let fileName = detectedFileName
-        let uid = generateUID()
+        let uid = matchedUID.isEmpty ? generateUID() : matchedUID
         
         shareExtensionLogger.info("📝 [登记新文件] 文件名: \(fileName) | UID: \(uid)")
         
@@ -983,13 +990,11 @@ struct ShareExtensionView: View {
                 switch result {
                 case .success(let verified):
                     if verified {
-                        let fileName = detectedFileName
-                        let existingRecords = AppGroupDBManager.shared.queryRecordsByFileName(fileName: fileName)
-                        
-                        if let existingRecord = existingRecords.first {
-                            let uid = existingRecord.uid
+                        if !matchedUID.isEmpty {
+                            let fileName = detectedFileName
+                            let uid = matchedUID
                             let password = capturedPassword
-                            shareExtensionLogger.info("🔄 [覆盖同名] 使用老UID: \(uid)")
+                            shareExtensionLogger.info("🔄 [保留身份] 使用文件原有UID: \(uid)")
                             
                             Task.detached {
                                 let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: password)
@@ -1018,7 +1023,43 @@ struct ShareExtensionView: View {
                                 }
                             }
                         } else {
-                            registerNewFile(password: capturedPassword)
+                            let fileName = detectedFileName
+                            let existingRecords = AppGroupDBManager.shared.queryRecordsByFileName(fileName: fileName)
+                            
+                            if let existingRecord = existingRecords.first {
+                                let uid = existingRecord.uid
+                                let password = capturedPassword
+                                shareExtensionLogger.info("🔄 [覆盖同名] 使用老UID: \(uid)")
+                                
+                                Task.detached {
+                                    let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: password)
+                                    
+                                    if success {
+                                        let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
+                                        
+                                        await MainActor.run {
+                                            if moveSuccess {
+                                                _ = AppGroupDBManager.shared.saveFileMapping(
+                                                    fileName: fileName,
+                                                    uid: uid,
+                                                    passwordHash: capturedPassword,
+                                                    fileSize: self.fileSize,
+                                                    isLocalVault: 1
+                                                )
+                                                self.completeExtension()
+                                            } else {
+                                                self.completeExtension(withError: "文件迁移失败")
+                                            }
+                                        }
+                                    } else {
+                                        await MainActor.run {
+                                            self.completeExtension(withError: "写入标记失败")
+                                        }
+                                    }
+                                }
+                            } else {
+                                registerNewFile(password: capturedPassword)
+                            }
                         }
                     } else {
                         verificationError = "密码验证失败，请重试"
@@ -1081,7 +1122,7 @@ struct ShareExtensionView: View {
     }
     
     private func generateUID() -> String {
-        return "LDAP_\(UUID().uuidString.prefix(8).uppercased())"
+        return UidGenerator.shared.createUid()
     }
     
     private nonisolated func writeWppmMarkers(tempURL: URL, uid: String, password: String?) -> Bool {
