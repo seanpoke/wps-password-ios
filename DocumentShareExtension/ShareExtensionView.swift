@@ -557,9 +557,9 @@ struct ShareExtensionView: View {
             let path = sourceURL.path.lowercased()
             shareExtensionLogger.info("🏠 [EXT] 原始来源路径: \(path, privacy: .public)")
             
-            if path.contains("wps") || path.contains("kingsoft") {
+            if path.contains("wps_share_temp_dir") {
                 hostType = .wps
-                shareExtensionLogger.info("🏠 [EXT] URL路径包含WPS特征，判定为WPS宿主")
+                shareExtensionLogger.info("🏠 [EXT] URL路径包含WPS分享临时目录特征，判定为WPS宿主")
             } else {
                 hostType = .external
                 shareExtensionLogger.info("🏠 [EXT] URL路径为外部来源")
@@ -568,9 +568,9 @@ struct ShareExtensionView: View {
             let path = tempURL.path.lowercased()
             shareExtensionLogger.info("🏠 [EXT] 备用路径(临时文件): \(path, privacy: .public)")
             
-            if path.contains("wps") || path.contains("kingsoft") {
+            if path.contains("wps_share_temp_dir") {
                 hostType = .wps
-                shareExtensionLogger.info("🏠 [EXT] 临时文件路径包含WPS特征，判定为WPS宿主")
+                shareExtensionLogger.info("🏠 [EXT] 临时文件路径包含WPS分享临时目录特征，判定为WPS宿主")
             } else {
                 hostType = .external
                 shareExtensionLogger.info("🏠 [EXT] 临时文件路径为外部来源")
