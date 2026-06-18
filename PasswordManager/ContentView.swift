@@ -1,5 +1,45 @@
 import SwiftUI
 import OSLog
+import UIKit
+
+class DocumentPreviewDelegate: NSObject, UIDocumentInteractionControllerDelegate {
+    static let shared = DocumentPreviewDelegate()
+    
+    func documentInteractionControllerViewControllerForPreview(_ controller: UIDocumentInteractionController) -> UIViewController {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first,
+              let rootVC = window.rootViewController else {
+            return UIViewController()
+        }
+        
+        // Find the topmost view controller
+        var topVC = rootVC
+        while let presented = topVC.presentedViewController {
+            topVC = presented
+        }
+        
+        // Ensure the view is loaded and in window hierarchy
+        _ = topVC.view
+        
+        return topVC
+    }
+    
+    func documentInteractionControllerRectForPreview(_ controller: UIDocumentInteractionController) -> CGRect {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first else {
+            return CGRect(x: 0, y: 0, width: 100, height: 100)
+        }
+        return window.bounds
+    }
+    
+    func documentInteractionControllerViewForPreview(_ controller: UIDocumentInteractionController) -> UIView? {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first else {
+            return nil
+        }
+        return window
+    }
+}
 
 struct ContentView: View {
     @State private var records: [FileMappingRecord] = []
@@ -11,6 +51,8 @@ struct ContentView: View {
             List {
                 ForEach(records, id: \.uid) { record in
                     AssetRow(record: record, onTap: {
+                        openFile(record: record)
+                    }, onLockTap: {
                         selectedRecord = record
                     })
                 }
@@ -95,40 +137,71 @@ struct ContentView: View {
             appLogger.error("❌ 删除文件失败: \(error)")
         }
     }
+    
+    private func openFile(record: FileMappingRecord) {
+        let appGroupID = "group.com.greenet.PasswordManager"
+        let safeVaultDir = "SafeVault"
+        
+        guard let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: appGroupID
+        ) else {
+            return
+        }
+        
+        let vaultDir = containerURL.appendingPathComponent(safeVaultDir, isDirectory: true)
+        let fileURL = vaultDir.appendingPathComponent(record.file_name)
+        
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            appLogger.error("❌ 文件不存在: \(fileURL.path)")
+            return
+        }
+        
+        let documentController = UIDocumentInteractionController(url: fileURL)
+        documentController.delegate = DocumentPreviewDelegate.shared
+        documentController.presentPreview(animated: true)
+    }
 }
 
 struct AssetRow: View {
     let record: FileMappingRecord
     let onTap: () -> Void
+    let onLockTap: () -> Void
     
     var body: some View {
         HStack(spacing: 16) {
-            FileIconView(fileName: record.file_name)
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(record.file_name)
-                    .font(.headline)
-                    .lineLimit(1)
+            // Left content is tappable
+            HStack(spacing: 16) {
+                FileIconView(fileName: record.file_name)
                 
-                HStack(spacing: 8) {
-                    Text(formatFileSize(record.file_size))
-                        .font(.caption)
-                        .foregroundColor(.gray)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(record.file_name)
+                        .font(.headline)
+                        .lineLimit(1)
                     
-                    Text(formatDate(record.last_access_time))
-                        .font(.caption)
-                        .foregroundColor(.gray)
+                    HStack(spacing: 8) {
+                        Text(formatFileSize(record.file_size))
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                        
+                        Text(formatDate(record.last_access_time))
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
                 }
             }
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onTap)
             
             Spacer()
             
-            Image(systemName: record.is_local_vault == 1 ? "lock.fill" : "lock.open")
-                .foregroundColor(record.is_local_vault == 1 ? .green : .orange)
-                .font(.title2)
+            // Lock button is NOT part of the tappable area
+            Button(action: onLockTap) {
+                Image(systemName: record.is_local_vault == 1 ? "lock.fill" : "lock.open")
+                    .foregroundColor(record.is_local_vault == 1 ? .green : .orange)
+                    .font(.title2)
+            }
+            .buttonStyle(.plain)
         }
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onTap)
         .padding(.vertical, 8)
     }
     
