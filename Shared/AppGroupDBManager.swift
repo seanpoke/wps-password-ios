@@ -4,7 +4,8 @@ import OSLog
 
 let dbLogger = Logger(subsystem: "com.greenet.PasswordManager", category: "Database")
 
-struct FileMappingRecord {
+struct FileMappingRecord: Identifiable {
+    let id: String
     let uid: String
     let file_name: String
     let password_hash: String
@@ -239,6 +240,7 @@ final class AppGroupDBManager {
                    let cName = sqlite3_column_text(stmt, 1),
                    let cHash = sqlite3_column_text(stmt, 2) {
                     record = FileMappingRecord(
+                        id: String(cString: cUid),
                         uid: String(cString: cUid),
                         file_name: String(cString: cName),
                         password_hash: String(cString: cHash),
@@ -271,6 +273,7 @@ final class AppGroupDBManager {
                    let cName = sqlite3_column_text(stmt, 1),
                    let cHash = sqlite3_column_text(stmt, 2) {
                     records.append(FileMappingRecord(
+                        id: String(cString: cUid),
                         uid: String(cString: cUid),
                         file_name: String(cString: cName),
                         password_hash: String(cString: cHash),
@@ -300,6 +303,7 @@ final class AppGroupDBManager {
                    let cName = sqlite3_column_text(stmt, 1),
                    let cHash = sqlite3_column_text(stmt, 2) {
                     records.append(FileMappingRecord(
+                        id: String(cString: cUid),
                         uid: String(cString: cUid),
                         file_name: String(cString: cName),
                         password_hash: String(cString: cHash),
@@ -327,6 +331,7 @@ final class AppGroupDBManager {
                    let cName = sqlite3_column_text(stmt, 1),
                    let cHash = sqlite3_column_text(stmt, 2) {
                     records.append(FileMappingRecord(
+                        id: String(cString: cUid),
                         uid: String(cString: cUid),
                         file_name: String(cString: cName),
                         password_hash: String(cString: cHash),

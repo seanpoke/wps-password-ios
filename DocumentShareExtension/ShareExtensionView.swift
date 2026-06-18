@@ -56,6 +56,9 @@ struct ShareExtensionView: View {
     @State private var assetList: [FileMappingRecord] = []
     @State private var showAssetList: Bool = false
     
+    @State private var showRenameDialog: Bool = false
+    @State private var newFileNameInput: String = ""
+    
     private let appGroupID = "group.com.greenet.PasswordManager"
     private let tempInboxDir = "Temp_Inbox"
     private let safeVaultDir = "SafeVault"
@@ -92,6 +95,11 @@ struct ShareExtensionView: View {
             }
         }
         .edgesIgnoringSafeArea(.all)
+        .overlay {
+            if showRenameDialog {
+                renameDialogView
+            }
+        }
         .onAppear {
             shareExtensionLogger.info("✅ [EXT] ===== View onAppear 触发 ===== ")
             Task {
@@ -243,7 +251,7 @@ struct ShareExtensionView: View {
                             .shadow(radius: 8)
                     }
                     
-                    Button(action: showAssetSelection) {
+                    Button(action: verifyAndShowAssetSelection) {
                         Text("关联并覆盖本地已有文件")
                             .font(.headline)
                             .foregroundColor(.white)
@@ -478,6 +486,78 @@ struct ShareExtensionView: View {
             }
             
             Spacer()
+        }
+    }
+    
+    private var renameDialogView: some View {
+        ZStack {
+            Color.black.opacity(0.5)
+                .edgesIgnoringSafeArea(.all)
+                .onTapGesture {
+                    showRenameDialog = false
+                }
+            
+            VStack(spacing: 24) {
+                Spacer()
+                
+                VStack(spacing: 20) {
+                    Image(systemName: "alert.circle")
+                        .font(.system(size: 60))
+                        .foregroundColor(.orange)
+                    
+                    Text("发现重名文件")
+                        .font(.title)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                    
+                    Text("保险箱中已存在同名文件，请输入新名称")
+                        .font(.body)
+                        .foregroundColor(.white.opacity(0.8))
+                        .multilineTextAlignment(.center)
+                    
+                    TextField("请输入新文件名", text: $newFileNameInput)
+                        .font(.title)
+                        .foregroundColor(.white)
+                        .padding()
+                        .background(Color.black.opacity(0.3))
+                        .cornerRadius(12)
+                        .padding(.horizontal, 20)
+                    
+                    if let error = verificationError {
+                        Text(error)
+                            .font(.subheadline)
+                            .foregroundColor(.red)
+                    }
+                    
+                    VStack(spacing: 12) {
+                        Button(action: confirmRename) {
+                            Text("确定")
+                                .font(.headline)
+                                .foregroundColor(.orange)
+                                .padding()
+                                .frame(maxWidth: 200)
+                                .background(Color.white)
+                                .cornerRadius(16)
+                                .shadow(radius: 8)
+                        }
+                        
+                        Button(action: {
+                            showRenameDialog = false
+                            verificationError = nil
+                        }) {
+                            Text("取消")
+                                .font(.body)
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+                    }
+                }
+                .padding(30)
+                .background(Color.black.opacity(0.7))
+                .cornerRadius(24)
+                .padding(.horizontal, 20)
+                
+                Spacer()
+            }
         }
     }
     
@@ -871,6 +951,52 @@ struct ShareExtensionView: View {
         }
     }
     
+    private func verifyAndShowAssetSelection() {
+        shareExtensionLogger.info("🔑 [关联覆盖] verifyAndShowAssetSelection 被调用")
+        shareExtensionLogger.info("🔑 [关联覆盖] 输入密码长度: \(capturedPassword.count)")
+        shareExtensionLogger.info("🔑 [关联覆盖] tempFilePath: \(tempFilePath?.path ?? "nil")")
+        
+        guard !capturedPassword.isEmpty, let tempURL = tempFilePath else {
+            shareExtensionLogger.error("❌ [关联覆盖] 参数无效: 密码为空=\(capturedPassword.isEmpty), 文件路径为nil=\(tempFilePath == nil)")
+            verificationError = "请输入密码"
+            return
+        }
+        
+        isVerifying = true
+        verificationError = nil
+        
+        shareExtensionLogger.info("🔑 [关联覆盖] 开始密码验证，文件: \(tempURL.lastPathComponent)")
+        
+        OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: tempURL, password: capturedPassword) { result in
+            let resultDescription: String
+            switch result {
+            case .success(let value):
+                resultDescription = "success(\(value))"
+            case .failure(let error):
+                resultDescription = "failure(\(error.localizedDescription))"
+            }
+            shareExtensionLogger.info("🔑 [关联覆盖] 密码验证回调返回: \(resultDescription)")
+            
+            DispatchQueue.main.async {
+                self.isVerifying = false
+                
+                switch result {
+                case .success(let verified):
+                    if verified {
+                        shareExtensionLogger.info("✅ [关联覆盖] 密码验证通过，显示资产选择列表")
+                        self.showAssetSelection()
+                    } else {
+                        shareExtensionLogger.warning("⚠️ [关联覆盖] 密码验证失败")
+                        self.verificationError = "密码验证失败，请重试"
+                    }
+                case .failure(let error):
+                    shareExtensionLogger.error("❌ [关联覆盖] 密码验证异常: \(error.localizedDescription)")
+                    self.verificationError = error.localizedDescription
+                }
+            }
+        }
+    }
+    
     private func registerNewFile(password: String) {
         shareExtensionLogger.info("📝 [登记新文件] registerNewFile 被调用")
         shareExtensionLogger.info("📝 [登记新文件] 密码长度: \(password.count)")
@@ -882,6 +1008,38 @@ struct ShareExtensionView: View {
         }
         
         let fileName = detectedFileName
+        
+        if fileNameExistsInVault(fileName: fileName) {
+            shareExtensionLogger.warning("⚠️ [登记新文件] 发现重名文件: \(fileName)")
+            newFileNameInput = fileName
+            showRenameDialog = true
+            return
+        }
+        
+        performRegisterNewFile(password: password, fileName: fileName)
+    }
+    
+    private func fileNameExistsInVault(fileName: String) -> Bool {
+        guard let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: appGroupID
+        ) else {
+            return false
+        }
+        
+        let vaultDir = containerURL.appendingPathComponent(safeVaultDir, isDirectory: true)
+        let destURL = vaultDir.appendingPathComponent(fileName)
+        return FileManager.default.fileExists(atPath: destURL.path)
+    }
+    
+    private func performRegisterNewFile(password: String, fileName: String) {
+        shareExtensionLogger.info("📝 [登记新文件] 开始注册，文件名: \(fileName)")
+        
+        guard let tempURL = tempFilePath else {
+            shareExtensionLogger.error("❌ [登记新文件] 文件路径无效")
+            completeExtension(withError: "文件路径无效")
+            return
+        }
+        
         let uid = matchedUID.isEmpty ? generateUID() : matchedUID
         
         shareExtensionLogger.info("📝 [登记新文件] 文件名: \(fileName) | UID: \(uid)")
@@ -921,6 +1079,20 @@ struct ShareExtensionView: View {
             shareExtensionLogger.error("❌ [登记新文件] WPPM 标记写入失败")
             completeExtension(withError: "写入标记失败")
         }
+    }
+    
+    private func confirmRename() {
+        let trimmedName = newFileNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if trimmedName.isEmpty {
+            verificationError = "文件名不能为空"
+            return
+        }
+        
+        showRenameDialog = false
+        verificationError = nil
+        
+        performRegisterNewFile(password: capturedPassword, fileName: trimmedName)
     }
     
     private func moveToSafeVaultSync(tempURL: URL, newFileName: String) -> Bool {
@@ -1165,14 +1337,15 @@ struct ShareExtensionView: View {
             return
         }
         
-        let uid = record.uid
         let fileName = record.file_name
         let password = capturedPassword
         
-        shareExtensionLogger.info("🎯 [状态D] 选择资产: \(fileName) | UID: \(uid)")
+        let targetUid = readUidFromVaultFile(fileName: fileName) ?? record.uid
+        
+        shareExtensionLogger.info("🎯 [状态D] 选择资产: \(fileName) | UID(数据库): \(record.uid) | UID(文件尾部): \(targetUid)")
         
         Task.detached {
-            let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: password)
+            let success = writeWppmMarkers(tempURL: tempURL, uid: targetUid, password: password)
             
             if success {
                 let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
@@ -1181,7 +1354,7 @@ struct ShareExtensionView: View {
                     if moveSuccess {
                             _ = AppGroupDBManager.shared.saveFileMapping(
                                 fileName: fileName,
-                                uid: uid,
+                                uid: targetUid,
                                 passwordHash: capturedPassword,
                                 fileSize: self.fileSize,
                                 isLocalVault: 1
@@ -1198,6 +1371,25 @@ struct ShareExtensionView: View {
                 }
             }
         }
+    }
+    
+    private func readUidFromVaultFile(fileName: String) -> String? {
+        guard let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: appGroupID
+        ) else {
+            return nil
+        }
+        
+        let vaultDir = containerURL.appendingPathComponent(safeVaultDir, isDirectory: true)
+        let fileURL = vaultDir.appendingPathComponent(fileName)
+        
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            let uid = ZipExtraFieldManager.shared.readUid(from: fileURL)
+            shareExtensionLogger.info("📖 [状态D] 从文件尾部读取UID: \(uid ?? "nil")")
+            return uid
+        }
+        
+        return nil
     }
     
     private func goBack() {

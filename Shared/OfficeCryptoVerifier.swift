@@ -123,12 +123,6 @@ final class OfficeCryptoVerifier {
             // 检查是否为加密的 OOXML 文件
             guard let encryptedPackageStart = fileData.range(of: "EncryptedPackage".data(using: .utf8)!) else {
                 cryptoLogger.debug("🔐 [密码验证] 文件中未找到 EncryptedPackage 标记")
-                
-                // 尝试用简化方法验证
-                if verifyBySimpleDecryption(data: fileData, password: password) {
-                    cryptoLogger.info("🔐 [密码验证] 简化验证通过")
-                    return .success(true)
-                }
                 return .success(false)
             }
             
@@ -151,13 +145,6 @@ final class OfficeCryptoVerifier {
                 if let result = verifyAgileEncryption(encryptionInfo: encInfo, password: password) {
                     return result
                 }
-            }
-            
-            // 尝试简化验证
-            cryptoLogger.debug("🔐 [密码验证] 尝试简化验证方法")
-            if verifyBySimpleDecryption(data: fileData, password: password) {
-                cryptoLogger.info("🔐 [密码验证] 简化验证通过")
-                return .success(true)
             }
             
             cryptoLogger.debug("🔐 [密码验证] 所有验证方法均失败")
@@ -482,36 +469,6 @@ final class OfficeCryptoVerifier {
         return Data(result)
     }
     
-    private func deriveKeyForStandardEncryption(password: String, salt: Data, iterations: Int, keyLength: Int) -> Data {
-        guard let passwordData = password.data(using: .utf16LittleEndian) else {
-            return Data()
-        }
-        
-        var ctx = CC_SHA1_CTX()
-        CC_SHA1_Init(&ctx)
-        _ = salt.withUnsafeBytes { CC_SHA1_Update(&ctx, $0.baseAddress, CC_LONG(salt.count)) }
-        _ = passwordData.withUnsafeBytes { CC_SHA1_Update(&ctx, $0.baseAddress, CC_LONG(passwordData.count)) }
-        var currentHash = [UInt8](repeating: 0, count: Int(CC_SHA1_DIGEST_LENGTH))
-        CC_SHA1_Final(&currentHash, &ctx)
-        
-        for i in 0..<iterations {
-            CC_SHA1_Init(&ctx)
-            CC_SHA1_Update(&ctx, &currentHash, CC_LONG(currentHash.count))
-            var iterBytes = UInt32(i).littleEndian
-            CC_SHA1_Update(&ctx, &iterBytes, 4)
-            CC_SHA1_Final(&currentHash, &ctx)
-        }
-        
-        CC_SHA1_Init(&ctx)
-        CC_SHA1_Update(&ctx, &currentHash, CC_LONG(currentHash.count))
-        var blockZero = UInt32(0).littleEndian
-        CC_SHA1_Update(&ctx, &blockZero, 4)
-        var finalHash = [UInt8](repeating: 0, count: Int(CC_SHA1_DIGEST_LENGTH))
-        CC_SHA1_Final(&finalHash, &ctx)
-        
-        return Data(finalHash[0..<keyLength])
-    }
-    
     private func aesDecrypt(data: Data, key: Data.SubSequence, iv: Data) -> Data? {
         let bufferSize = data.count + kCCBlockSizeAES128
         var decryptedBytes = [UInt8](repeating: 0, count: bufferSize)
@@ -539,37 +496,6 @@ final class OfficeCryptoVerifier {
         
         if status != kCCSuccess {
             cryptoLogger.error("❌ [密码验证] AES 解密失败，状态码: \(status)")
-            return nil
-        }
-        
-        return Data(decryptedBytes.prefix(numBytesDecrypted))
-    }
-    
-    private func aesECBDecrypt(data: Data, key: Data.SubSequence) -> Data? {
-        let bufferSize = data.count + kCCBlockSizeAES128
-        var decryptedBytes = [UInt8](repeating: 0, count: bufferSize)
-        var numBytesDecrypted: size_t = 0
-        
-        let status = key.withUnsafeBytes { keyBytes in
-            data.withUnsafeBytes { dataBytes in
-                CCCrypt(
-                    CCOperation(kCCDecrypt),
-                    CCAlgorithm(kCCAlgorithmAES),
-                    CCOptions(kCCOptionECBMode | kCCOptionPKCS7Padding),
-                    keyBytes.baseAddress,
-                    key.count,
-                    nil,
-                    dataBytes.baseAddress,
-                    data.count,
-                    &decryptedBytes,
-                    bufferSize,
-                    &numBytesDecrypted
-                )
-            }
-        }
-        
-        if status != kCCSuccess {
-            cryptoLogger.error("❌ [密码验证] AES-ECB 解密失败，状态码: \(status)")
             return nil
         }
         
@@ -686,55 +612,23 @@ final class OfficeCryptoVerifier {
     private func verifyOLE2Password(data: Data, password: String) -> Result<Bool, CryptoError> {
         cryptoLogger.info("🔐 [OLE2] 开始验证 OLE2 格式密码")
         
-        // 使用轻量级 OLE2 解析器读取 EncryptionInfo 流
         if let ole2Parser = OLE2Parser(data: data) {
             cryptoLogger.info("🔐 [OLE2] OLE2 解析器初始化成功")
             
-            // 打印所有流名称以便调试
             ole2Parser.listAllStreams()
             
-            // 尝试读取 EncryptionInfo 流
             if let encryptionInfo = ole2Parser.readStream(name: "EncryptionInfo") {
                 cryptoLogger.info("🔐 [OLE2] 找到 EncryptionInfo 流，长度: \(encryptionInfo.count)")
                 cryptoLogger.debug("🔐 [OLE2] EncryptionInfo 前 32 字节: \(encryptionInfo.prefix(32).map { String(format: "%02X", $0) }.joined(separator: " "))")
                 
-                // 尝试解析
                 if let result = verifyEncryptionInfo(encryptionInfo, password: password) {
                     return result
                 }
             } else {
                 cryptoLogger.warning("🔐 [OLE2] 未找到 EncryptionInfo 流")
             }
-            
-            // 尝试读取 EncryptedPackage 流
-            if let encryptedPackage = ole2Parser.readStream(name: "EncryptedPackage") {
-                cryptoLogger.info("🔐 [OLE2] 找到 EncryptedPackage 流，长度: \(encryptedPackage.count)")
-            }
         } else {
             cryptoLogger.warning("🔐 [OLE2] OLE2 解析器初始化失败")
-        }
-        
-        // 尝试直接搜索加密信息
-        let result = verifyStandardEncryption(data: data, password: password)
-        
-        if result {
-            return .success(true)
-        }
-        
-        // 尝试 Agile Encryption（也可能封装在 OLE2 中）
-        if let encInfoRange = data.range(of: "EncryptionInfo".data(using: .utf8)!) {
-            let searchStart = max(0, encInfoRange.lowerBound - 100)
-            let encInfoData = data.subdata(in: searchStart..<min(data.count, encInfoRange.upperBound + 4096))
-            
-            if let agileResult = verifyAgileEncryption(encryptionInfo: encInfoData, password: password) {
-                return agileResult
-            }
-        }
-        
-        // 尝试用密码解密文件头验证
-        if verifyOLE2ByDecryptingHeader(data: data, password: password) {
-            cryptoLogger.info("🔐 [OLE2] 通过解密文件头验证成功")
-            return .success(true)
         }
         
         cryptoLogger.debug("🔐 [OLE2] 所有 OLE2 验证方法均失败")
@@ -1008,331 +902,6 @@ final class OfficeCryptoVerifier {
         }
         cryptoLogger.error("🔐 [标准二进制] AES-ECB 解密失败，状态码: \(cryptStatus)")
         return nil
-    }
-    
-    private func verifyStandardEncryption(data: Data, password: String) -> Bool {
-        cryptoLogger.info("🔐 [标准加密] 尝试标准加密验证")
-        
-        // 搜索 EncryptionInfo 结构
-        // 格式：version(4) + flags(4) + size(4) + ...
-        
-        for offset in stride(from: 0, to: min(data.count - 12, 500), by: 1) {
-            if data.count < offset + 12 {
-                break
-            }
-            
-            let versionMajor = UInt16(data[offset]) | (UInt16(data[offset + 1]) << 8)
-            let versionMinor = UInt16(data[offset + 2]) | (UInt16(data[offset + 3]) << 8)
-            let flags = UInt32(data[offset + 4]) | (UInt32(data[offset + 5]) << 8) | (UInt32(data[offset + 6]) << 16) | (UInt32(data[offset + 7]) << 24)
-            let infoSize = UInt32(data[offset + 8]) | (UInt32(data[offset + 9]) << 8) | (UInt32(data[offset + 10]) << 16) | (UInt32(data[offset + 11]) << 24)
-            
-            // 标准加密版本通常是 2.2, 3.2, 4.2
-            // Agile 加密版本是 4.4
-            if (versionMajor >= 2 && versionMajor <= 4) && (versionMinor == 2 || versionMinor == 4) {
-                cryptoLogger.debug("🔐 [标准加密] 在偏移 \(offset) 找到加密信息，版本: \(versionMajor).\(versionMinor)")
-                
-                // 尝试解析
-                let infoStart = offset + 12
-                if infoStart + Int(infoSize) <= data.count {
-                    let infoData = data.subdata(in: infoStart..<infoStart + Int(infoSize))
-                    
-                    if versionMajor == 4 && versionMinor == 4 {
-                        // Agile Encryption - XML 格式
-                        if let xmlString = String(data: infoData, encoding: .utf8) {
-                            if let result = verifyAgileXML(xmlString: xmlString, password: password) {
-                                return result == .success(true)
-                            }
-                        }
-                    } else {
-                        // Standard Encryption - 二进制格式
-                        if verifyStandardBinary(data: infoData, password: password) {
-                            return true
-                        }
-                    }
-                }
-            }
-        }
-        
-        return false
-    }
-    
-    private func verifyStandardBinary(data: Data, password: String) -> Bool {
-        cryptoLogger.info("🔐 [标准加密] 尝试二进制格式验证")
-        
-        // 标准加密格式解析（参考 Apache POI）
-        // EncryptionHeader:
-        // - algId (4 bytes)
-        // - algIdHash (4 bytes)
-        // - keySize (4 bytes)
-        // - providerType (4 bytes)
-        // - reserved1 (4 bytes)
-        // - reserved2 (4 bytes)
-        // - keyData (variable)
-        
-        // EncryptionVerifier:
-        // - saltSize (4 bytes)
-        // - salt (variable)
-        // - encryptedVerifierHashInput (16 bytes)
-        // - encryptedVerifierHashValue (16 bytes)
-        
-        guard data.count >= 24 else {
-            return false
-        }
-        
-        let algId = UInt32(data[0]) | (UInt32(data[1]) << 8) | (UInt32(data[2]) << 16) | (UInt32(data[3]) << 24)
-        let algIdHash = UInt32(data[4]) | (UInt32(data[5]) << 8) | (UInt32(data[6]) << 16) | (UInt32(data[7]) << 24)
-        let keySize = UInt32(data[8]) | (UInt32(data[9]) << 8) | (UInt32(data[10]) << 16) | (UInt32(data[11]) << 24)
-        
-        cryptoLogger.debug("🔐 [标准加密] algId: \(String(format: "%08X", algId))")
-        cryptoLogger.debug("🔐 [标准加密] algIdHash: \(String(format: "%08X", algIdHash))")
-        cryptoLogger.debug("🔐 [标准加密] keySize: \(keySize)")
-        
-        // 解析 EncryptionVerifier
-        var offset = 24
-        
-        if offset + 4 > data.count {
-            return false
-        }
-        let saltSize = UInt32(data[offset]) | (UInt32(data[offset + 1]) << 8) | (UInt32(data[offset + 2]) << 16) | (UInt32(data[offset + 3]) << 24)
-        offset += 4
-        
-        if offset + Int(saltSize) > data.count {
-            return false
-        }
-        let salt = data.subdata(in: offset..<offset + Int(saltSize))
-        offset += Int(saltSize)
-        
-        if offset + 16 + 16 > data.count {
-            return false
-        }
-        let encryptedVerifierHashInput = data.subdata(in: offset..<offset + 16)
-        offset += 16
-        let encryptedVerifierHashValue = data.subdata(in: offset..<offset + 16)
-        
-        cryptoLogger.debug("🔐 [标准加密] salt 长度: \(salt.count)")
-        cryptoLogger.debug("🔐 [标准加密] encryptedVerifierHashInput 长度: \(encryptedVerifierHashInput.count)")
-        cryptoLogger.debug("🔐 [标准加密] encryptedVerifierHashValue 长度: \(encryptedVerifierHashValue.count)")
-        
-        // 派生密钥
-        let passwordData = password.data(using: .utf16LittleEndian)!
-        let derivedKey = pbkdf2(
-            password: passwordData,
-            salt: salt,
-            iterations: 50000, // Office 标准加密默认迭代次数
-            keyLength: Int(keySize / 8),
-            hashAlgorithm: "SHA1"
-        )
-        
-        cryptoLogger.debug("🔐 [标准加密] 派生密钥长度: \(derivedKey.count)")
-        
-        if derivedKey.count == 0 {
-            return false
-        }
-        
-        // 解密 verifierHashInput
-        let decryptedHashInput = aesDecrypt(
-            data: encryptedVerifierHashInput,
-            key: derivedKey.prefix(min(derivedKey.count, 32)),
-            iv: Data(repeating: 0, count: 16)
-        )
-        
-        cryptoLogger.debug("🔐 [标准加密] 解密后的 HashInput 长度: \(decryptedHashInput?.count ?? 0)")
-        
-        guard let hashInput = decryptedHashInput, hashInput.count >= 16 else {
-            return false
-        }
-        
-        // 计算 Hash
-        let verifierHash = hashInput.sha1()
-        
-        // 解密 encryptedVerifierHashValue
-        let decryptedVerifierHashValue = aesDecrypt(
-            data: encryptedVerifierHashValue,
-            key: derivedKey.prefix(min(derivedKey.count, 32)),
-            iv: Data(repeating: 0, count: 16)
-        )
-        
-        cryptoLogger.debug("🔐 [标准加密] 解密后的 VerifierHashValue 长度: \(decryptedVerifierHashValue?.count ?? 0)")
-        
-        guard let expectedHash = decryptedVerifierHashValue else {
-            return false
-        }
-        
-        // 比较前 20 字节（SHA-1 长度）
-        let isValid = verifierHash.prefix(20).elementsEqual(expectedHash.prefix(20))
-        
-        cryptoLogger.debug("🔐 [标准加密] 验证结果: \(isValid)")
-        
-        return isValid
-    }
-    
-    private func verifyOLE2ByDecryptingHeader(data: Data, password: String) -> Bool {
-        cryptoLogger.info("🔐 [OLE2] 尝试通过解密文件头验证")
-        
-        // OLE2 加密文件的前几个扇区通常使用 RC4 或 AES 加密
-        // 如果密码正确，可以解密出有效的 OLE2 结构
-        
-        guard data.count >= 512 else {
-            return false
-        }
-        
-        // 尝试 RC4 解密（旧版 Office 使用）
-        let rc4Result = tryRC4Decryption(data: data, password: password)
-        if rc4Result {
-            return true
-        }
-        
-        // 尝试 AES 解密
-        let aesResult = tryAESDecryption(data: data, password: password)
-        if aesResult {
-            return true
-        }
-        
-        return false
-    }
-    
-    private func tryRC4Decryption(data: Data, password: String) -> Bool {
-        cryptoLogger.debug("🔐 [RC4] 尝试 RC4 解密")
-        
-        // RC4 密钥派生（Office 标准加密）
-        // 密码 + salt + spinCount -> SHA-1 -> 密钥
-        
-        // 尝试从文件中提取 salt
-        // 在 EncryptionVerifier 中通常有 salt
-        
-        // 简单尝试：使用密码的 SHA-1 作为 RC4 密钥
-        let passwordKey = password.data(using: .utf16LittleEndian)?.sha1() ?? Data()
-        
-        if passwordKey.count == 0 {
-            return false
-        }
-        
-        // RC4 解密前 16 字节
-        let decrypted = rc4Decrypt(data: data.prefix(16), key: passwordKey)
-        
-        let ole2Magic: [UInt8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]
-        
-        if decrypted.starts(with: Data(ole2Magic)) {
-            cryptoLogger.debug("🔐 [RC4] 解密后匹配 OLE2 魔数")
-            return true
-        }
-        
-        return false
-    }
-    
-    private func tryAESDecryption(data: Data, password: String) -> Bool {
-        cryptoLogger.debug("🔐 [AES] 尝试 AES 解密")
-        
-        // 尝试用密码派生密钥并解密
-        // Office 使用多种密钥派生方式
-        
-        // 尝试简单的密钥派生：密码 SHA-1 -> 16/32 字节密钥
-        let passwordKey = password.data(using: .utf16LittleEndian)?.sha1() ?? Data()
-        
-        if passwordKey.count >= 16 {
-            let key16 = passwordKey.prefix(16)
-            let decrypted16 = aesDecrypt(
-                data: data.prefix(min(16, data.count)),
-                key: key16,
-                iv: Data(repeating: 0, count: 16)
-            )
-            
-            if let decrypted = decrypted16 {
-                let ole2Magic: [UInt8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]
-                if decrypted.starts(with: Data(ole2Magic)) {
-                    cryptoLogger.debug("🔐 [AES] 解密后匹配 OLE2 魔数")
-                    return true
-                }
-            }
-        }
-        
-        if passwordKey.count >= 32 {
-            let key32 = passwordKey.prefix(32)
-            let decrypted32 = aesDecrypt(
-                data: data.prefix(min(16, data.count)),
-                key: key32,
-                iv: Data(repeating: 0, count: 16)
-            )
-            
-            if let decrypted = decrypted32 {
-                let ole2Magic: [UInt8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]
-                if decrypted.starts(with: Data(ole2Magic)) {
-                    cryptoLogger.debug("🔐 [AES] 解密后匹配 OLE2 魔数")
-                    return true
-                }
-            }
-        }
-        
-        return false
-    }
-    
-    private func rc4Decrypt(data: Data, key: Data) -> Data {
-        guard key.count > 0 else {
-            return data
-        }
-        
-        var S = [UInt8](0...255)
-        var j: UInt8 = 0
-        
-        // Key-scheduling algorithm
-        for i in 0...255 {
-            j = j &+ S[i] &+ key[i % key.count]
-            S.swapAt(i, Int(j))
-        }
-        
-        // Pseudo-random generation algorithm
-        var i: UInt8 = 0
-        j = 0
-        var result = Data()
-        
-        for byte in data {
-            i = i &+ 1
-            j = j &+ S[Int(i)]
-            S.swapAt(Int(i), Int(j))
-            let t = S[Int(i)] &+ S[Int(j)]
-            result.append(byte ^ S[Int(t)])
-        }
-        
-        return result
-    }
-    
-    private func verifyBySimpleDecryption(data: Data, password: String) -> Bool {
-        cryptoLogger.debug("🔐 [简化验证] 开始简化验证")
-        
-        // Office Agile Encryption 文件的前 16 字节通常是加密的
-        // 如果我们能用密码"解密"出 ZIP 魔数 (50 4B 03 04)，说明密码正确
-        // 或者能解密出 OLE2 魔数 (D0 CF 11 E0 A1 B1 1A E1)
-        
-        guard data.count >= 16 else {
-            return false
-        }
-        
-        // Office 使用 SHA-1 派生加密密钥
-        let passwordKey = password.data(using: .utf8)?.sha1() ?? Data()
-        let testKey = Data(passwordKey.prefix(16))
-        
-        // XOR 解密（简化版，实际 Office 使用 AES）
-        let firstBlock = data.prefix(16)
-        var decrypted = Data()
-        for (i, byte) in firstBlock.enumerated() {
-            decrypted.append(byte ^ testKey[i % testKey.count])
-        }
-        
-        // 检查是否解密出有效魔数
-        let zipMagic = Data([0x50, 0x4B, 0x03, 0x04])
-        let ole2Magic: [UInt8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]
-        
-        if decrypted.prefix(4) == zipMagic {
-            cryptoLogger.debug("🔐 [简化验证] 解密后匹配 ZIP 魔数")
-            return true
-        }
-        
-        if decrypted.starts(with: Data(ole2Magic)) {
-            cryptoLogger.debug("🔐 [简化验证] 解密后匹配 OLE2 魔数")
-            return true
-        }
-        
-        return false
     }
 }
 
