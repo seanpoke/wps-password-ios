@@ -26,6 +26,8 @@ struct ContentView: View {
     @State private var records: [FileMappingRecord] = []
     @State private var selectedRecord: FileMappingRecord?
     @State private var isRefreshing = false
+    @State private var deleteConfirmRecord: FileMappingRecord?
+    @State private var showDeleteAlert = false
     
     var body: some View {
         NavigationStack {
@@ -37,7 +39,7 @@ struct ContentView: View {
                         selectedRecord = record
                     })
                 }
-                .onDelete(perform: deleteRecords)
+                .onDelete(perform: requestDelete)
                 
                 if records.isEmpty {
                     Text("暂无资产记录")
@@ -63,6 +65,21 @@ struct ContentView: View {
             .sheet(item: $selectedRecord) { record in
                 AssetDetailView(record: record)
             }
+            .alert("确认删除", isPresented: $showDeleteAlert, actions: {
+                Button("取消", role: .cancel) {
+                    deleteConfirmRecord = nil
+                }
+                Button("删除", role: .destructive) {
+                    if let record = deleteConfirmRecord {
+                        deleteRecord(record: record)
+                    }
+                    deleteConfirmRecord = nil
+                }
+            }, message: {
+                if let record = deleteConfirmRecord {
+                    Text("确定要删除 \"\(record.file_name)\" 吗？此操作不可撤销。")
+                }
+            })
             .overlay(
                 Group {
                     if isRefreshing {
@@ -88,10 +105,12 @@ struct ContentView: View {
         loadRecords()
     }
     
-    private func deleteRecords(at offsets: IndexSet) {
+    private func requestDelete(at offsets: IndexSet) {
         for offset in offsets {
             let record = records[offset]
-            deleteRecord(record: record)
+            deleteConfirmRecord = record
+            showDeleteAlert = true
+            return
         }
     }
     
