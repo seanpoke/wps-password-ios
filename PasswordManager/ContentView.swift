@@ -18,26 +18,7 @@ class DocumentPreviewDelegate: NSObject, UIDocumentInteractionControllerDelegate
             topVC = presented
         }
         
-        // Ensure the view is loaded and in window hierarchy
-        _ = topVC.view
-        
         return topVC
-    }
-    
-    func documentInteractionControllerRectForPreview(_ controller: UIDocumentInteractionController) -> CGRect {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first else {
-            return CGRect(x: 0, y: 0, width: 100, height: 100)
-        }
-        return window.bounds
-    }
-    
-    func documentInteractionControllerViewForPreview(_ controller: UIDocumentInteractionController) -> UIView? {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first else {
-            return nil
-        }
-        return window
     }
 }
 
@@ -156,9 +137,25 @@ struct ContentView: View {
             return
         }
         
-        let documentController = UIDocumentInteractionController(url: fileURL)
-        documentController.delegate = DocumentPreviewDelegate.shared
-        documentController.presentPreview(animated: true)
+        // Defer to next runloop tick to ensure view hierarchy is ready
+        DispatchQueue.main.async {
+            guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                  let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first,
+                  var topVC = window.rootViewController else {
+                return
+            }
+            
+            while let presented = topVC.presentedViewController {
+                topVC = presented
+            }
+            
+            // Ensure the view is loaded
+            _ = topVC.view
+            
+            let documentController = UIDocumentInteractionController(url: fileURL)
+            documentController.delegate = DocumentPreviewDelegate.shared
+            documentController.presentPreview(animated: true)
+        }
     }
 }
 
