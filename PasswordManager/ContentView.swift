@@ -2,32 +2,14 @@ import SwiftUI
 import OSLog
 import UIKit
 
-class DocumentPreviewDelegate: NSObject, UIDocumentInteractionControllerDelegate {
-    static let shared = DocumentPreviewDelegate()
-    
-    func documentInteractionControllerViewControllerForPreview(_ controller: UIDocumentInteractionController) -> UIViewController {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first,
-              let rootVC = window.rootViewController else {
-            return UIViewController()
-        }
-        
-        // Find the topmost view controller
-        var topVC = rootVC
-        while let presented = topVC.presentedViewController {
-            topVC = presented
-        }
-        
-        return topVC
-    }
-}
-
 struct ContentView: View {
     @State private var records: [FileMappingRecord] = []
     @State private var selectedRecord: FileMappingRecord?
     @State private var isRefreshing = false
     @State private var deleteConfirmRecord: FileMappingRecord?
     @State private var showDeleteAlert = false
+    @State private var toastMessage: String?
+    @State private var toastVisible = false
     
     var body: some View {
         NavigationStack {
@@ -84,6 +66,14 @@ struct ContentView: View {
                 Group {
                     if isRefreshing {
                         ProgressView("加载中...")
+                    }
+                }
+            )
+            .overlay(
+                Group {
+                    if toastVisible, let message = toastMessage {
+                        ToastView(message: message)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 }
             )
@@ -156,25 +146,111 @@ struct ContentView: View {
             return
         }
         
-        // Defer to next runloop tick to ensure view hierarchy is ready
-        DispatchQueue.main.async {
-            guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                  let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first,
-                  var topVC = window.rootViewController else {
-                return
+        DispatchQueue.global().async {
+            let password = ZipExtraFieldManager.shared.readPassword(from: fileURL)
+            
+            DispatchQueue.main.async {
+                if let password = password {
+                    UIPasteboard.general.string = password
+                    appLogger.info("🔑 密码已复制到剪贴板")
+                    
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 30) {
+                        if UIPasteboard.general.string == password {
+                            UIPasteboard.general.string = nil
+                            appLogger.info("🔐 剪贴板已清理")
+                        }
+                    }
+                    
+                    self.showToast(message: "密码已复制到剪贴板")
+                }
+                
+                guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                      let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first,
+                      var topVC = window.rootViewController else {
+                    return
+                }
+                
+                while let presented = topVC.presentedViewController {
+                    topVC = presented
+                }
+                
+                _ = topVC.view
+                
+                let tempDir = FileManager.default.temporaryDirectory
+                let tempFileURL = tempDir.appendingPathComponent(record.file_name)
+                
+                do {
+                    if FileManager.default.fileExists(atPath: tempFileURL.path) {
+                        try FileManager.default.removeItem(at: tempFileURL)
+                    }
+                    try FileManager.default.copyItem(at: fileURL, to: tempFileURL)
+                    appLogger.info("📤 文件已复制到临时目录: \(tempFileURL.path)")
+                    
+                    appLogger.info("🚀 直接打开文件")
+                    UIApplication.shared.open(tempFileURL) { success in
+                        if success {
+                            appLogger.info("✅ 文件打开成功")
+                            
+                            DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+                                do {
+                                    if FileManager.default.fileExists(atPath: tempFileURL.path) {
+                                        try FileManager.default.removeItem(at: tempFileURL)
+                                        appLogger.info("🗑️ 临时文件已清理")
+                                    }
+                                } catch {
+                                    appLogger.error("❌ 清理临时文件失败: \(error)")
+                                }
+                            }
+                            
+                            DispatchQueue.global().async {
+                                AppGroupDBManager.shared.updateAccessTime(uid: record.uid)
+                                appLogger.info("📅 已更新文件访问时间: \(record.file_name)")
+                            }
+                        } else {
+                            appLogger.error("❌ 文件打开失败")
+                            
+                            do {
+                                if FileManager.default.fileExists(atPath: tempFileURL.path) {
+                                    try FileManager.default.removeItem(at: tempFileURL)
+                                    appLogger.info("🗑️ 打开失败，清理临时文件")
+                                }
+                            } catch {
+                                appLogger.error("❌ 清理临时文件失败: \(error)")
+                            }
+                        }
+                    }
+                } catch {
+                    appLogger.error("❌ 复制文件失败: \(error)")
+                }
             }
-            
-            while let presented = topVC.presentedViewController {
-                topVC = presented
-            }
-            
-            // Ensure the view is loaded
-            _ = topVC.view
-            
-            let documentController = UIDocumentInteractionController(url: fileURL)
-            documentController.delegate = DocumentPreviewDelegate.shared
-            documentController.presentPreview(animated: true)
         }
+    }
+    
+    private func showToast(message: String) {
+        toastMessage = message
+        toastVisible = true
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            toastVisible = false
+        }
+    }
+}
+
+struct ToastView: View {
+    let message: String
+    
+    var body: some View {
+        VStack {
+            Text(message)
+                .foregroundColor(.white)
+                .font(.body)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(Color.black.opacity(0.7))
+                .cornerRadius(8)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, 100)
     }
 }
 
