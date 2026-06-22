@@ -59,6 +59,8 @@ struct ShareExtensionView: View {
     @State private var showRenameDialog: Bool = false
     @State private var newFileNameInput: String = ""
     
+    @State private var previousState: ActionState = .yellowCanvas
+    
     private let appGroupID = "group.com.greenet.PasswordManager"
     private let tempInboxDir = "Temp_Inbox"
     private let safeVaultDir = "SafeVault"
@@ -1327,6 +1329,7 @@ struct ShareExtensionView: View {
     }
     
     private func showAssetSelection() {
+        previousState = actionState
         assetList = AppGroupDBManager.shared.queryAllLocalVaultRecords()
         actionState = .stateD
     }
@@ -1393,7 +1396,7 @@ struct ShareExtensionView: View {
     }
     
     private func goBack() {
-        actionState = .yellowCanvas
+        actionState = previousState
     }
     
     private func generateUID() -> String {

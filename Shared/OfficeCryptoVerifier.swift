@@ -157,19 +157,9 @@ final class OfficeCryptoVerifier {
     }
     
     private func findEncryptionInfo(in data: Data, before endOffset: Int) -> Data? {
-        // Office 加密文件的 EncryptionInfo 通常在 EncryptedPackage 之前的 4KB 范围内
-        // 它可能是：
-        // 1. 一个独立的流
-        // 2. 嵌入在文件的其他位置
-        
-        // 首先尝试查找 "EncryptionInfo" 字符串
         let searchRange = max(0, endOffset - 8192)..<endOffset
         let searchData = data.subdata(in: searchRange)
         
-        // 查找所有可能的 EncryptionInfo 位置
-        var results: [Data] = []
-        
-        // 尝试作为 XML 解析
         if let xmlString = String(data: searchData, encoding: .utf8) {
             if xmlString.contains("<encryption") || xmlString.contains("keyData") || xmlString.contains("encryptedKey") {
                 cryptoLogger.debug("🔐 [密码验证] 找到加密 XML")
@@ -177,21 +167,17 @@ final class OfficeCryptoVerifier {
             }
         }
         
-        // 尝试查找二进制格式的 EncryptionInfo
-        // 格式: versionMajor(2) + versionMinor(2) + flags(4) + encryptionInfoSize(4) + ...
         for offset in stride(from: searchData.count - 100, through: 0, by: -1) {
             if offset + 8 <= searchData.count {
                 let versionMajor = UInt16(searchData[offset]) | (UInt16(searchData[offset + 1]) << 8)
                 let versionMinor = UInt16(searchData[offset + 2]) | (UInt16(searchData[offset + 3]) << 8)
                 
-                // Agile Encryption 版本通常是 4.4
                 if versionMajor == 4 && versionMinor == 4 {
                     cryptoLogger.debug("🔐 [密码验证] 在偏移 \(offset) 找到 Agile Encryption 标记")
                     let infoStart = searchRange.lowerBound + offset
                     return data.subdata(in: infoStart..<endOffset)
                 }
                 
-                // Standard Encryption 版本可能是 2.2, 3.2, 4.2
                 if (versionMajor >= 2 && versionMajor <= 4) && versionMinor == 2 {
                     cryptoLogger.debug("🔐 [密码验证] 在偏移 \(offset) 找到 Standard Encryption 标记")
                     let infoStart = searchRange.lowerBound + offset
@@ -206,64 +192,65 @@ final class OfficeCryptoVerifier {
     private func verifyAgileEncryption(encryptionInfo: Data, password: String) -> Result<Bool, CryptoError>? {
         cryptoLogger.debug("🔐 [Agile] 开始验证 Agile Encryption")
         
-        // 尝试解析为 XML 格式
-        if let xmlString = String(data: encryptionInfo, encoding: .utf8) {
-            if xmlString.contains("<encryption") || xmlString.contains("keyData") {
-                cryptoLogger.debug("🔐 [Agile] 识别为 XML 格式")
-                return verifyAgileXML(xmlString: xmlString, password: password)
-            }
+        guard encryptionInfo.count > 8 else {
+            cryptoLogger.debug("🔐 [Agile] EncryptionInfo 数据太短")
+            return nil
         }
         
-        // 尝试解析为二进制格式
-        return verifyAgileBinary(encryptionInfo: encryptionInfo, password: password)
+        let xmlData = encryptionInfo.subdata(in: 8..<encryptionInfo.count)
+        if let xmlString = String(data: xmlData, encoding: .utf8) {
+            return verifyAgileXML(xmlString: xmlString, password: password)
+        }
+        
+        return nil
     }
     
     private func verifyAgileXML(xmlString: String, password: String) -> Result<Bool, CryptoError>? {
         cryptoLogger.debug("🔐 [Agile XML] 开始解析 XML")
+        cryptoLogger.debug("🔐 [Agile XML] XML 长度: \(xmlString.count)")
         
-        // 提取加密参数
-        guard let keyDataSalt = extractBase64Value(from: xmlString, tag: "saltValue", parent: "keyData") else {
-            cryptoLogger.debug("🔐 [Agile XML] 未找到 keyData salt")
-            return nil
-        }
-        cryptoLogger.debug("🔐 [Agile XML] 找到 salt，长度: \(keyDataSalt.count)")
+        // Agile Encryption XML 格式：
+        // <p:encryptedKey spinCount="..." saltValue="..." encryptedVerifierHashInput="..." encryptedVerifierHashValue="..." encryptedKeyValue="..."/>
+        // 所有值都是 encryptedKey 标签的属性
         
-        guard let passwordSalt = extractBase64Value(from: xmlString, tag: "saltValue", parent: "encryptedKey") else {
-            cryptoLogger.debug("🔐 [Agile XML] 未找到 password salt")
-            return nil
-        }
-        cryptoLogger.debug("🔐 [Agile XML] 找到 password salt，长度: \(passwordSalt.count)")
-        
-        guard let spinCountStr = extractAttributeValue(from: xmlString, tag: "encryptedKey", attribute: "spinCount"),
+        guard let spinCountStr = extractTagAttribute(xmlString, tag: "encryptedKey", attribute: "spinCount"),
               let spinCount = Int(spinCountStr) else {
-            cryptoLogger.debug("🔐 [Agile XML] 未找到 spinCount，使用默认值 100000")
+            cryptoLogger.debug("🔐 [Agile XML] 未找到 spinCount")
             return nil
         }
         cryptoLogger.debug("🔐 [Agile XML] spinCount: \(spinCount)")
         
-        guard let encryptedKeyValue = extractBase64Value(from: xmlString, tag: "encryptedKeyValue", parent: "encryptedKey") else {
+        guard let passwordSaltBase64 = extractTagAttribute(xmlString, tag: "encryptedKey", attribute: "saltValue"),
+              let passwordSalt = Data(base64Encoded: passwordSaltBase64) else {
+            cryptoLogger.debug("🔐 [Agile XML] 未找到 saltValue")
+            return nil
+        }
+        cryptoLogger.debug("🔐 [Agile XML] 找到 saltValue，长度: \(passwordSalt.count)")
+        
+        guard let encryptedKeyValueBase64 = extractTagAttribute(xmlString, tag: "encryptedKey", attribute: "encryptedKeyValue"),
+              let encryptedKeyValue = Data(base64Encoded: encryptedKeyValueBase64) else {
             cryptoLogger.debug("🔐 [Agile XML] 未找到 encryptedKeyValue")
             return nil
         }
         cryptoLogger.debug("🔐 [Agile XML] 找到 encryptedKeyValue，长度: \(encryptedKeyValue.count)")
         
-        guard let encryptedVerifierHashInput = extractBase64Value(from: xmlString, tag: "encryptedVerifierHashInput", parent: "encryptedKey") else {
+        guard let encryptedVerifierHashInputBase64 = extractTagAttribute(xmlString, tag: "encryptedKey", attribute: "encryptedVerifierHashInput"),
+              let encryptedVerifierHashInput = Data(base64Encoded: encryptedVerifierHashInputBase64) else {
             cryptoLogger.debug("🔐 [Agile XML] 未找到 encryptedVerifierHashInput")
             return nil
         }
         cryptoLogger.debug("🔐 [Agile XML] 找到 encryptedVerifierHashInput，长度: \(encryptedVerifierHashInput.count)")
         
-        guard let encryptedVerifierHashValue = extractBase64Value(from: xmlString, tag: "encryptedVerifierHashValue", parent: "encryptedKey") else {
+        guard let encryptedVerifierHashValueBase64 = extractTagAttribute(xmlString, tag: "encryptedKey", attribute: "encryptedVerifierHashValue"),
+              let encryptedVerifierHashValue = Data(base64Encoded: encryptedVerifierHashValueBase64) else {
             cryptoLogger.debug("🔐 [Agile XML] 未找到 encryptedVerifierHashValue")
             return nil
         }
         cryptoLogger.debug("🔐 [Agile XML] 找到 encryptedVerifierHashValue，长度: \(encryptedVerifierHashValue.count)")
         
-        // 获取哈希算法
-        let hashAlgorithm = extractAttributeValue(from: xmlString, tag: "encryptedKey", attribute: "hashAlgorithm") ?? "SHA512"
+        let hashAlgorithm = extractTagAttribute(xmlString, tag: "encryptedKey", attribute: "hashAlgorithm") ?? "SHA1"
         cryptoLogger.debug("🔐 [Agile XML] hashAlgorithm: \(hashAlgorithm)")
         
-        // 验证密码
         let result = verifyPassword(
             password: password,
             salt: passwordSalt,
@@ -277,78 +264,27 @@ final class OfficeCryptoVerifier {
         return result ? .success(true) : .success(false)
     }
     
-    private func verifyAgileBinary(encryptionInfo: Data, password: String) -> Result<Bool, CryptoError>? {
-        guard encryptionInfo.count >= 8 else {
-            return nil
-        }
-        
-        cryptoLogger.debug("🔐 [Agile Binary] 开始解析二进制格式")
-        
-        // 读取版本信息
-        let versionMajor = UInt16(encryptionInfo[0]) | (UInt16(encryptionInfo[1]) << 8)
-        let versionMinor = UInt16(encryptionInfo[2]) | (UInt16(encryptionInfo[3]) << 8)
-        
-        cryptoLogger.debug("🔐 [Agile Binary] 版本: \(versionMajor).\(versionMinor)")
-        
-        // Agile Encryption (4.4) 从偏移 8 开始是 XML
-        if versionMajor == 4 && versionMinor == 4 {
-            let xmlData = encryptionInfo.subdata(in: 8..<encryptionInfo.count)
-            if let xmlString = String(data: xmlData, encoding: .utf8) {
-                return verifyAgileXML(xmlString: xmlString, password: password)
-            }
-        }
-        
-        return nil
-    }
-    
-    private func extractBase64Value(from xml: String, tag: String, parent: String) -> Data? {
-        // 查找父标签
-        let parentPattern = "<\(parent)[^>]*>"
-        guard let parentRange = xml.range(of: parentPattern, options: .regularExpression) else {
-            return nil
-        }
-        
-        // 在父标签内容中查找目标标签
-        let parentContent = String(xml[parentRange.upperBound...])
-        
-        // 查找 saltValue 或 encryptedKeyValue 等标签
-        let tagPattern = "<\(tag)>([^<]+)</\(tag)>"
-        guard let match = parentContent.range(of: tagPattern, options: .regularExpression) else {
-            return nil
-        }
-        
-        let matchString = String(parentContent[match])
-        // 提取 base64 值
-        let valuePattern = ">([^<]+)<"
-        guard let valueMatch = matchString.range(of: valuePattern, options: .regularExpression) else {
-            return nil
-        }
-        
-        let base64String = String(matchString[valueMatch]).dropFirst().dropLast()
-        return Data(base64Encoded: String(base64String))
-    }
-    
-    private func extractAttributeValue(from xml: String, tag: String, attribute: String) -> String? {
-        let tagPattern = "<\(tag)[^>]+>"
+    private func extractTagAttribute(_ xml: String, tag: String, attribute: String) -> String? {
+        let tagPattern = "<[^>]*\(tag)[^>]+>"
         guard let tagRange = xml.range(of: tagPattern, options: .regularExpression) else {
             return nil
         }
-        
         let tagString = String(xml[tagRange])
         let attrPattern = "\(attribute)=\"([^\"]+)\""
-        
         guard let match = tagString.range(of: attrPattern, options: .regularExpression) else {
             return nil
         }
-        
         let matchString = String(tagString[match])
         let valuePattern = "\"[^\"]+\""
         guard let valueMatch = matchString.range(of: valuePattern, options: .regularExpression) else {
             return nil
         }
-        
         return String(matchString[valueMatch]).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
     }
+    
+    private let kVerifierInputBlock: [UInt8] = [0xfe, 0xa7, 0xd2, 0x76, 0x3b, 0x4b, 0x9e, 0x79]
+    private let kHashedVerifierBlock: [UInt8] = [0xd7, 0xaa, 0x0f, 0x6d, 0x30, 0x61, 0x34, 0x4e]
+    private let kCryptoKeyBlock: [UInt8] = [0x14, 0x6e, 0x0b, 0xe7, 0xab, 0xac, 0xd0, 0xd6]
     
     private func verifyPassword(password: String,
                                 salt: Data,
@@ -358,7 +294,8 @@ final class OfficeCryptoVerifier {
                                 encryptedVerifierHashInput: Data,
                                 encryptedVerifierHashValue: Data) -> Bool {
         
-        cryptoLogger.debug("🔐 [密码验证] 开始 PBKDF2 密钥派生")
+        cryptoLogger.debug("🔐 [密码验证] 开始 Agile Encryption 密码验证")
+        cryptoLogger.info("🔐 [密码验证] 验证的密码: \(password)")
         cryptoLogger.debug("🔐 [密码验证] 密码长度: \(password.count)")
         cryptoLogger.debug("🔐 [密码验证] Salt 长度: \(salt.count)")
         cryptoLogger.debug("🔐 [密码验证] SpinCount: \(spinCount)")
@@ -367,106 +304,159 @@ final class OfficeCryptoVerifier {
         // Office 使用 UTF-16LE 编码的密码
         let passwordData = password.data(using: .utf16LittleEndian)!
         
-        // PBKDF2 派生密钥
-        let derivedKey = pbkdf2(
-            password: passwordData,
-            salt: salt,
-            iterations: spinCount,
-            keyLength: 64, // 32字节密钥 + 32字节HMAC密钥
-            hashAlgorithm: hashAlgorithm
-        )
+        // Step 1: ECMA-376 自定义迭代哈希 (不是 PBKDF2)
+        // H_0 = H(salt + password)
+        // H_n = H(iterator + H_n-1)
+        let hashSize = hashAlgorithm.lowercased().contains("sha512") ? 64 :
+                       hashAlgorithm.lowercased().contains("sha256") ? 32 : 20
+        let pwHash = hashPassword(passwordData: passwordData,
+                                  salt: salt,
+                                  spinCount: spinCount,
+                                  hashAlgorithm: hashAlgorithm)
         
-        cryptoLogger.debug("🔐 [密码验证] 派生密钥长度: \(derivedKey.count)")
+        cryptoLogger.debug("🔐 [密码验证] pwHash 长度: \(pwHash.count)")
         
-        guard derivedKey.count >= 64 else {
-            cryptoLogger.error("❌ [密码验证] 派生密钥长度不足")
+        guard !pwHash.isEmpty else {
+            cryptoLogger.error("❌ [密码验证] 哈希派生失败")
             return false
         }
         
-        let encryptionKey = derivedKey.prefix(32)
-        let hmacKey = derivedKey.suffix(32)
+        // Step 2: 使用 kVerifierInputBlock 生成解密密钥，解密 verifierHashInput
+        // H_final = H(pwHash + blockKey)，用 0x36 填充到 keySize
+        let keySize = 16
+        let verifierKey = generateKey(pwHash: pwHash, hashAlgorithm: hashAlgorithm, blockKey: kVerifierInputBlock, keySize: keySize)
         
-        cryptoLogger.debug("🔐 [密码验证] 加密密钥长度: \(encryptionKey.count)")
-        cryptoLogger.debug("🔐 [密码验证] HMAC密钥长度: \(hmacKey)")
+        cryptoLogger.debug("🔐 [密码验证] verifierKey 长度: \(verifierKey.count)")
         
-        // 使用 AES-256-CBC 解密 encryptedVerifierHashInput
-        let decryptedHashInput = aesDecrypt(
+        // IV 生成: generateIv(hashAlgo, salt, null, blockSize) -> IV = salt (用 0x36 填充到 blockSize)
+        let iv = generateIv(hashAlgorithm: hashAlgorithm, salt: salt, blockKey: nil, blockSize: 16)
+        
+        cryptoLogger.debug("🔐 [密码验证] IV 长度: \(iv.count)")
+        cryptoLogger.debug("🔐 [密码验证] IV: \(iv.map { String(format: "%02X", $0) }.joined())")
+        
+        // 解密 encryptedVerifierHashInput
+        let decryptedVerifier = aesDecrypt(
             data: encryptedVerifierHashInput,
-            key: encryptionKey,
-            iv: Data(repeating: 0, count: 16)
+            key: verifierKey,
+            iv: iv
         )
         
-        cryptoLogger.debug("🔐 [密码验证] 解密后的 HashInput 长度: \(decryptedHashInput?.count ?? 0)")
+        cryptoLogger.debug("🔐 [密码验证] 解密后的 verifier 长度: \(decryptedVerifier?.count ?? 0)")
+        if let ver = decryptedVerifier {
+            cryptoLogger.debug("🔐 [密码验证] 解密后的 verifier: \(ver.map { String(format: "%02X", $0) }.joined())")
+        }
         
-        guard let hashInput = decryptedHashInput, hashInput.count >= 16 else {
-            cryptoLogger.error("❌ [密码验证] 解密 HashInput 失败")
+        guard let verifier = decryptedVerifier, !verifier.isEmpty else {
+            cryptoLogger.error("❌ [密码验证] 解密 verifierHashInput 失败")
             return false
         }
         
-        // 计算解密数据的 Hash
-        let verifierHash = hashData(
-            data: hashInput,
-            algorithm: hashAlgorithm
+        // Step 3: 计算 verifier 的哈希值
+        let verifierHash = hashData(data: verifier, algorithm: hashAlgorithm)
+        
+        cryptoLogger.debug("🔐 [密码验证] verifierHash 长度: \(verifierHash.count)")
+        cryptoLogger.debug("🔐 [密码验证] verifierHash: \(verifierHash.map { String(format: "%02X", $0) }.joined())")
+        
+        // Step 4: 使用 kHashedVerifierBlock 生成解密密钥，解密 verifierHashValue
+        let hashKey = generateKey(pwHash: pwHash, hashAlgorithm: hashAlgorithm, blockKey: kHashedVerifierBlock, keySize: keySize)
+        
+        cryptoLogger.debug("🔐 [密码验证] hashKey 长度: \(hashKey.count)")
+        
+        // 解密 encryptedVerifierHashValue
+        let decryptedVerifierHash = aesDecrypt(
+            data: encryptedVerifierHashValue,
+            key: hashKey,
+            iv: iv
         )
         
-        cryptoLogger.debug("🔐 [密码验证] 计算的 VerifierHash 长度: \(verifierHash.count)")
+        cryptoLogger.debug("🔐 [密码验证] 解密后的 verifierHash 长度: \(decryptedVerifierHash?.count ?? 0)")
+        if let vh = decryptedVerifierHash {
+            cryptoLogger.debug("🔐 [密码验证] 解密后的 verifierHash: \(vh.map { String(format: "%02X", $0) }.joined())")
+        }
         
-        // 使用 HMAC 计算
-        let calculatedHmac = hmac(
-            data: hashInput,
-            key: hmacKey,
-            algorithm: hashAlgorithm
-        )
+        guard let expectedVerifierHash = decryptedVerifierHash, !expectedVerifierHash.isEmpty else {
+            cryptoLogger.error("❌ [密码验证] 解密 verifierHashValue 失败")
+            return false
+        }
         
-        cryptoLogger.debug("🔐 [密码验证] 计算的 HMAC 长度: \(calculatedHmac.count)")
+        // Step 5: 截取期望的哈希值（去除填充）
+        let expectedHashTrimmed = expectedVerifierHash.prefix(hashSize)
         
-        // 比较前 20 字节（SHA-1 的长度）
-        let hashLength = min(verifierHash.count, encryptedVerifierHashValue.count)
+        cryptoLogger.debug("🔐 [密码验证] 计算的哈希: \(verifierHash.map { String(format: "%02X", $0) }.joined())")
+        cryptoLogger.debug("🔐 [密码验证] 期望的哈希: \(expectedHashTrimmed.map { String(format: "%02X", $0) }.joined())")
         
-        let encryptedVerifierHashPrefix = encryptedVerifierHashValue.prefix(hashLength)
-        let calculatedHashPrefix = calculatedHmac.prefix(hashLength)
-        
-        let isValid = encryptedVerifierHashPrefix.elementsEqual(calculatedHashPrefix)
+        let isValid = verifierHash == expectedHashTrimmed
         
         cryptoLogger.debug("🔐 [密码验证] 验证结果: \(isValid)")
         
         return isValid
     }
     
-    private func pbkdf2(password: Data, salt: Data, iterations: Int, keyLength: Int, hashAlgorithm: String) -> Data {
-        var result = [UInt8](repeating: 0, count: keyLength)
+    private func hashPassword(passwordData: Data, salt: Data, spinCount: Int, hashAlgorithm: String) -> Data {
+        // ECMA-376 2.3.4.11:
+        // H_0 = H(salt + password)
+        // H_n = H(iterator + H_n-1)，iterator 是 32 位无符号整数，从 0 到 spinCount-1
         
-        let prfAlgorithm: CCPseudoRandomAlgorithm
-        if hashAlgorithm.lowercased().contains("sha256") {
-            prfAlgorithm = CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256)
-        } else if hashAlgorithm.lowercased().contains("sha1") {
-            prfAlgorithm = CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA1)
+        let initialData = salt + passwordData
+        var currentHash = hashData(data: initialData, algorithm: hashAlgorithm)
+        
+        for iterator in 0..<spinCount {
+            var iteratorBytes = [UInt8](repeating: 0, count: 4)
+            iteratorBytes[0] = UInt8(iterator & 0xFF)
+            iteratorBytes[1] = UInt8((iterator >> 8) & 0xFF)
+            iteratorBytes[2] = UInt8((iterator >> 16) & 0xFF)
+            iteratorBytes[3] = UInt8((iterator >> 24) & 0xFF)
+            
+            let combined = Data(iteratorBytes) + currentHash
+            currentHash = hashData(data: combined, algorithm: hashAlgorithm)
+        }
+        
+        return currentHash
+    }
+    
+    private func generateKey(pwHash: Data, hashAlgorithm: String, blockKey: [UInt8], keySize: Int) -> Data {
+        // ECMA-376 2.3.4.11:
+        // H_final = H(H_n + blockKey)
+        // 如果结果小于 keySize，用 0x36 填充；如果大于，截断
+        
+        let combined = pwHash + Data(blockKey)
+        let hFinal = hashData(data: combined, algorithm: hashAlgorithm)
+        
+        var result = Data()
+        if hFinal.count >= keySize {
+            result = hFinal.prefix(keySize)
         } else {
-            prfAlgorithm = CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA512)
+            result = hFinal
+            result.append(Data(repeating: 0x36, count: keySize - hFinal.count))
         }
         
-        let status = password.withUnsafeBytes { passwordBytes in
-            salt.withUnsafeBytes { saltBytes in
-                CCKeyDerivationPBKDF(
-                    CCPBKDFAlgorithm(kCCPBKDF2),
-                    passwordBytes.baseAddress,
-                    password.count,
-                    saltBytes.baseAddress,
-                    salt.count,
-                    prfAlgorithm,
-                    UInt32(iterations),
-                    &result,
-                    keyLength
-                )
-            }
+        return result
+    }
+    
+    private func generateIv(hashAlgorithm: String, salt: Data, blockKey: [UInt8]?, blockSize: Int) -> Data {
+        // ECMA-376 2.3.4.12:
+        // 如果提供了 blockKey: IV = H(KeySalt + blockKey)
+        // 如果没有提供 blockKey: IV = KeySalt
+        // 如果 IV 长度小于 blockSize，用 0x36 填充；如果大于，截断
+        
+        var iv: Data
+        
+        if let blockKey = blockKey {
+            let combined = salt + Data(blockKey)
+            iv = hashData(data: combined, algorithm: hashAlgorithm)
+        } else {
+            iv = salt
         }
         
-        if status != kCCSuccess {
-            cryptoLogger.error("❌ [密码验证] PBKDF2 失败，状态码: \(status)")
-            return Data()
+        var result = Data()
+        if iv.count >= blockSize {
+            result = iv.prefix(blockSize)
+        } else {
+            result = iv
+            result.append(Data(repeating: 0x36, count: blockSize - iv.count))
         }
         
-        return Data(result)
+        return result
     }
     
     private func aesDecrypt(data: Data, key: Data.SubSequence, iv: Data) -> Data? {
@@ -524,34 +514,6 @@ final class OfficeCryptoVerifier {
         }
         
         return Data(hash)
-    }
-    
-    private func hmac(data: Data, key: Data.SubSequence, algorithm: String) -> Data {
-        var hmac = [UInt8](repeating: 0, count: Int(CC_SHA512_DIGEST_LENGTH))
-        
-        let hmacAlgorithm: CCHmacAlgorithm
-        if algorithm.lowercased().contains("sha256") {
-            hmacAlgorithm = CCHmacAlgorithm(kCCHmacAlgSHA256)
-        } else if algorithm.lowercased().contains("sha1") {
-            hmacAlgorithm = CCHmacAlgorithm(kCCHmacAlgSHA1)
-        } else {
-            hmacAlgorithm = CCHmacAlgorithm(kCCHmacAlgSHA512)
-        }
-        
-        key.withUnsafeBytes { keyBytes in
-            data.withUnsafeBytes { dataBytes in
-                CCHmac(
-                    hmacAlgorithm,
-                    keyBytes.baseAddress,
-                    key.count,
-                    dataBytes.baseAddress,
-                    data.count,
-                    &hmac
-                )
-            }
-        }
-        
-        return Data(hmac)
     }
     
     private func analyzeFileStructure(data: Data) {
@@ -646,25 +608,7 @@ final class OfficeCryptoVerifier {
             return nil
         }
         
-        // 尝试不同的格式
-        // 1. 标准二进制格式：version(2) + flags(2) + ...
-        // 2. Agile 格式：version(4) + xml...
-        
-        // 检查是否为 XML 格式
-        if let xmlString = String(data: encryptionInfo, encoding: .utf8) {
-            if xmlString.contains("<?xml") || xmlString.contains("<encryption") {
-                cryptoLogger.info("🔐 [EncryptionInfo] 识别为 XML 格式")
-                return verifyAgileXML(xmlString: xmlString, password: password)
-            }
-        }
-        
-        // 尝试标准格式
-        // Office 2007+ 的 EncryptionInfo 格式：
-        // - versionMajor (2 bytes, little-endian)
-        // - versionMinor (2 bytes, little-endian)
-        // - flags (4 bytes, little-endian) - 标准加密为 0，Agile 为 0x40
-        // - 后续数据取决于版本
-        
+        // 解析版本和标志
         let versionMajor = UInt16(encryptionInfo[0]) | (UInt16(encryptionInfo[1]) << 8)
         let versionMinor = UInt16(encryptionInfo[2]) | (UInt16(encryptionInfo[3]) << 8)
         let flags = UInt32(encryptionInfo[4]) | (UInt32(encryptionInfo[5]) << 8) | (UInt32(encryptionInfo[6]) << 16) | (UInt32(encryptionInfo[7]) << 24)
@@ -672,11 +616,13 @@ final class OfficeCryptoVerifier {
         cryptoLogger.info("🔐 [EncryptionInfo] 版本: \(versionMajor).\(versionMinor), Flags: \(String(format: "%08X", flags))")
         
         // Agile Encryption: version 4.4
+        // 格式: versionMajor(2) + versionMinor(2) + flags(4) + xmlData
         if versionMajor == 4 && versionMinor == 4 {
-            cryptoLogger.info("🔐 [EncryptionInfo] 识别为 Agile Encryption")
+            cryptoLogger.info("🔐 [EncryptionInfo] 识别为 Agile Encryption 4.4")
             let xmlData = encryptionInfo.subdata(in: 8..<encryptionInfo.count)
             if let xmlString = String(data: xmlData, encoding: .utf8) {
                 cryptoLogger.debug("🔐 [EncryptionInfo] XML 长度: \(xmlString.count)")
+                cryptoLogger.debug("🔐 [EncryptionInfo] XML 前 100 字符: \(xmlString.prefix(100))")
                 return verifyAgileXML(xmlString: xmlString, password: password)
             }
         }
@@ -687,7 +633,14 @@ final class OfficeCryptoVerifier {
             return verifyStandardBinaryEncryption(encryptionInfo: encryptionInfo, password: password)
         }
         
-        // WPS 可能使用自定义格式
+        // 检查是否为纯 XML 格式（无二进制头部）
+        if let xmlString = String(data: encryptionInfo, encoding: .utf8) {
+            if xmlString.hasPrefix("<?xml") || xmlString.hasPrefix("<encryption") {
+                cryptoLogger.info("🔐 [EncryptionInfo] 识别为纯 XML 格式")
+                return verifyAgileXML(xmlString: xmlString, password: password)
+            }
+        }
+        
         // 尝试查找 XML 片段
         let xmlSearchRange = 8..<min(encryptionInfo.count, 4096)
         let xmlSearchData = encryptionInfo.subdata(in: xmlSearchRange)
