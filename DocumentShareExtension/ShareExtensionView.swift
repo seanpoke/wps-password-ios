@@ -27,6 +27,14 @@ enum ActionState: CustomStringConvertible {
 }
 
 @MainActor
+enum PendingAction {
+    case none
+    case syncOverride
+    case saveAsNew(newFileName: String)
+    case associateOverride
+}
+
+@MainActor
 enum HostType {
     case wps
     case external
@@ -46,6 +54,7 @@ struct ShareExtensionView: View {
     @State private var originalSourceURL: URL?
     @State private var matchedAssetName: String = ""
     @State private var matchedUID: String = ""
+    @State private var matchedIsLocalVault: Int = 0
     @State private var capturedPassword: String = ""
     @State private var isVerifying: Bool = false
     @State private var verificationError: String?
@@ -58,8 +67,13 @@ struct ShareExtensionView: View {
     
     @State private var showRenameDialog: Bool = false
     @State private var newFileNameInput: String = ""
+    @State private var isSaveAsNewMode: Bool = false
+    @State private var fileExtension: String = ""
     
     @State private var previousState: ActionState = .yellowCanvas
+    
+    @State private var showPasswordInputDialog: Bool = false
+    @State private var pendingAction: PendingAction = .none
     
     private let appGroupID = "group.com.greenet.PasswordManager"
     private let tempInboxDir = "Temp_Inbox"
@@ -96,10 +110,14 @@ struct ShareExtensionView: View {
                     .background(Color.gray)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .edgesIgnoringSafeArea(.all)
         .overlay {
             if showRenameDialog {
                 renameDialogView
+            }
+            if showPasswordInputDialog {
+                passwordInputDialogView
             }
         }
         .onAppear {
@@ -206,7 +224,7 @@ struct ShareExtensionView: View {
                 .shadow(radius: 10)
             
             VStack(spacing: 16) {
-                Text("登记新文件")
+                Text("识别到新文件")
                     .font(.title)
                     .fontWeight(.bold)
                     .foregroundColor(.white)
@@ -243,7 +261,7 @@ struct ShareExtensionView: View {
             } else {
                 VStack(spacing: 16) {
                     Button(action: verifyAndRegisterAsNew) {
-                        Text("登记为本地新文件")
+                        Text("文件另存为")
                             .font(.headline)
                             .foregroundColor(.orange)
                             .padding()
@@ -254,7 +272,7 @@ struct ShareExtensionView: View {
                     }
                     
                     Button(action: verifyAndShowAssetSelection) {
-                        Text("关联并覆盖本地已有文件")
+                        Text("覆盖其他文件")
                             .font(.headline)
                             .foregroundColor(.white)
                             .padding()
@@ -286,12 +304,12 @@ struct ShareExtensionView: View {
                 .shadow(radius: 10)
             
             VStack(spacing: 16) {
-                Text("检测到回流资产")
+                Text("保存文件")
                     .font(.title)
                     .fontWeight(.bold)
                     .foregroundColor(.white)
                 
-                Text("匹配到: \(matchedAssetName)")
+                Text(matchedIsLocalVault == 1 ? "匹配到文件: \(matchedAssetName)" : "匹配到记录: \(matchedAssetName)")
                     .font(.headline)
                     .foregroundColor(.white.opacity(0.9))
                     .padding(.horizontal, 20)
@@ -302,37 +320,40 @@ struct ShareExtensionView: View {
             
             VStack(spacing: 16) {
                 Button(action: syncOverrideAction) {
-                    Text("确定同步覆盖")
+                    Text("同步覆盖")
                         .font(.headline)
                         .foregroundColor(.blue)
                         .padding()
-                        .frame(maxWidth: 280)
+                        .frame(maxWidth: .infinity)
                         .background(Color.white)
                         .cornerRadius(16)
                         .shadow(radius: 8)
                 }
+                .padding(.horizontal, 20)
                 
                 Button(action: saveAsNewAction) {
-                    Text("另存为新文件")
+                    Text("文件另存为")
                         .font(.headline)
                         .foregroundColor(.white)
                         .padding()
-                        .frame(maxWidth: 280)
+                        .frame(maxWidth: .infinity)
                         .background(Color.white.opacity(0.2))
                         .cornerRadius(16)
                         .shadow(radius: 8)
                 }
+                .padding(.horizontal, 20)
                 
-                Button(action: showAssetSelection) {
-                    Text("选择其他文件关联覆盖")
+                Button(action: verifyAndShowAssetSelectionFromBlueA) {
+                    Text("覆盖其他文件")
                         .font(.headline)
                         .foregroundColor(.white)
                         .padding()
-                        .frame(maxWidth: 280)
+                        .frame(maxWidth: .infinity)
                         .background(Color.white.opacity(0.15))
                         .cornerRadius(16)
                         .shadow(radius: 8)
                 }
+                .padding(.horizontal, 20)
             }
             
             Button(action: cancelAction) {
@@ -397,38 +418,29 @@ struct ShareExtensionView: View {
                     .scaleEffect(2)
             } else {
                 VStack(spacing: 16) {
-                    Button(action: overrideWithNewPassword) {
-                        Text(matchedUID.isEmpty ? "确定同步覆盖(同名老资产)" : "确认登记并保留身份")
-                            .font(.headline)
-                            .foregroundColor(.blue)
-                            .padding()
-                            .frame(maxWidth: 280)
-                            .background(Color.white)
-                            .cornerRadius(16)
-                            .shadow(radius: 8)
-                    }
-                    
-                    Button(action: verifyAndRegisterAsNew) {
-                        Text("登记为本地新文件")
+                    Button(action: verifyPasswordAndSaveAsNewFromBlueB) {
+                        Text("文件另存为")
                             .font(.headline)
                             .foregroundColor(.white)
                             .padding()
-                            .frame(maxWidth: 280)
+                            .frame(maxWidth: .infinity)
                             .background(Color.white.opacity(0.2))
                             .cornerRadius(16)
                             .shadow(radius: 8)
                     }
+                    .padding(.horizontal, 20)
                     
-                    Button(action: showAssetSelection) {
-                        Text("关联并覆盖本地已有文件")
+                    Button(action: verifyAndShowAssetSelection) {
+                        Text("覆盖其他文件")
                             .font(.headline)
                             .foregroundColor(.white)
                             .padding()
-                            .frame(maxWidth: 280)
+                            .frame(maxWidth: .infinity)
                             .background(Color.white.opacity(0.15))
                             .cornerRadius(16)
                             .shadow(radius: 8)
                     }
+                    .padding(.horizontal, 20)
                 }
             }
             
@@ -503,27 +515,39 @@ struct ShareExtensionView: View {
                 Spacer()
                 
                 VStack(spacing: 20) {
-                    Image(systemName: "alert.circle")
-                        .font(.system(size: 60))
-                        .foregroundColor(.orange)
+                    if !isSaveAsNewMode {
+                        Image(systemName: "alert.circle")
+                            .font(.system(size: 60))
+                            .foregroundColor(.orange)
+                    }
                     
-                    Text("发现重名文件")
+                    Text(isSaveAsNewMode ? "另存为新文件" : "发现重名文件")
                         .font(.title)
                         .fontWeight(.bold)
                         .foregroundColor(.white)
                     
-                    Text("保险箱中已存在同名文件，请输入新名称")
+                    Text(isSaveAsNewMode ? "请输入新文件的名称" : "保险箱中已存在同名文件，请输入新名称")
                         .font(.body)
                         .foregroundColor(.white.opacity(0.8))
                         .multilineTextAlignment(.center)
                     
-                    TextField("请输入新文件名", text: $newFileNameInput)
-                        .font(.title)
-                        .foregroundColor(.white)
-                        .padding()
-                        .background(Color.black.opacity(0.3))
-                        .cornerRadius(12)
-                        .padding(.horizontal, 20)
+                    HStack(spacing: 8) {
+                        TextField("请输入新文件名", text: $newFileNameInput)
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
+                            .background(Color.black.opacity(0.3))
+                            .cornerRadius(12)
+                            .frame(maxWidth: .infinity)
+                        
+                        Text(fileExtension)
+                            .font(.headline)
+                            .foregroundColor(.white.opacity(0.6))
+                            .padding(.vertical, 12)
+                            .padding(.trailing, 16)
+                    }
+                    .padding(.horizontal, 20)
                     
                     if let error = verificationError {
                         Text(error)
@@ -535,13 +559,14 @@ struct ShareExtensionView: View {
                         Button(action: confirmRename) {
                             Text("确定")
                                 .font(.headline)
-                                .foregroundColor(.orange)
+                                .foregroundColor(isSaveAsNewMode ? .blue : .orange)
                                 .padding()
-                                .frame(maxWidth: 200)
+                                .frame(maxWidth: .infinity)
                                 .background(Color.white)
                                 .cornerRadius(16)
                                 .shadow(radius: 8)
                         }
+                        .padding(.horizontal, 20)
                         
                         Button(action: {
                             showRenameDialog = false
@@ -555,12 +580,135 @@ struct ShareExtensionView: View {
                 }
                 .padding(30)
                 .background(Color.black.opacity(0.7))
-                .cornerRadius(24)
-                .padding(.horizontal, 20)
+                .cornerRadius(32)
+                .frame(maxWidth: .infinity)
                 
                 Spacer()
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .edgesIgnoringSafeArea(.all)
+    }
+    
+    private var passwordInputDialogView: some View {
+        ZStack {
+            Color.black.opacity(0.5)
+                .edgesIgnoringSafeArea(.all)
+                .onTapGesture {
+                    showPasswordInputDialog = false
+                    pendingAction = .none
+                }
+            
+            VStack(spacing: 24) {
+                Spacer()
+                
+                VStack(spacing: 20) {
+                    Text("请输入文件密码")
+                        .font(.title)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                    
+                    Text("密码验证失败，请重新输入")
+                        .font(.body)
+                        .foregroundColor(.white.opacity(0.8))
+                        .multilineTextAlignment(.center)
+                    
+                    SecureField("请输入密码", text: $capturedPassword)
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 16)
+                        .background(Color.black.opacity(0.3))
+                        .cornerRadius(12)
+                        .padding(.horizontal, 20)
+                    
+                    if let error = verificationError {
+                        Text(error)
+                            .font(.subheadline)
+                            .foregroundColor(.red)
+                    }
+                    
+                    VStack(spacing: 12) {
+                        Button(action: confirmPasswordInput) {
+                            Text("确定")
+                                .font(.headline)
+                                .foregroundColor(.blue)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color.white)
+                                .cornerRadius(16)
+                                .shadow(radius: 8)
+                        }
+                        .padding(.horizontal, 20)
+                        
+                        Button(action: {
+                            showPasswordInputDialog = false
+                            pendingAction = .none
+                            verificationError = nil
+                        }) {
+                            Text("取消")
+                                .font(.body)
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+                    }
+                }
+                .padding(30)
+                .background(Color.black.opacity(0.7))
+                .cornerRadius(32)
+                .frame(maxWidth: .infinity)
+                
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .edgesIgnoringSafeArea(.all)
+    }
+    
+    private func confirmPasswordInput() {
+        guard let tempURL = tempFilePath else {
+            completeExtension(withError: "文件路径无效")
+            return
+        }
+        
+        if capturedPassword.isEmpty {
+            verificationError = "请输入密码"
+            return
+        }
+        
+        isVerifying = true
+        
+        OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: tempURL, password: capturedPassword) { result in
+            Task { @MainActor in
+                self.isVerifying = false
+                
+                switch result {
+                case .success(let verified):
+                    if verified {
+                        self.showPasswordInputDialog = false
+                        self.verificationError = nil
+                        self.executePendingAction()
+                    } else {
+                        self.verificationError = "密码验证失败，请重试"
+                    }
+                case .failure(let error):
+                    self.verificationError = error.localizedDescription
+                }
+            }
+        }
+    }
+    
+    private func executePendingAction() {
+        switch pendingAction {
+        case .syncOverride:
+            performSyncOverride(fileName: matchedAssetName, uid: matchedUID, password: capturedPassword)
+        case .saveAsNew(let newFileName):
+            performSaveAsNew(newFileName: newFileName, password: capturedPassword)
+        case .associateOverride:
+            showAssetSelection()
+        case .none:
+            break
+        }
+        pendingAction = .none
     }
     
     private func processIncomingFiles() async {
@@ -741,6 +889,7 @@ struct ShareExtensionView: View {
                 shareExtensionLogger.info("✅ [通路2] 数据库找到记录: \(record.file_name)")
                 matchedUID = uid
                 matchedAssetName = record.file_name
+                matchedIsLocalVault = record.is_local_vault
                 capturedPassword = record.password_hash
                 shareExtensionLogger.info("✅ [通路2] 设置密码: \(capturedPassword.prefix(8))...")
                 actionState = .blueCanvasA
@@ -800,6 +949,7 @@ struct ShareExtensionView: View {
         if let record = matchedRecord, let password = foundPassword {
             matchedUID = record.uid
             matchedAssetName = record.file_name
+            matchedIsLocalVault = record.is_local_vault
             capturedPassword = password
             shareExtensionLogger.info("✅ [通路4] 设置状态为 blueCanvasA")
             actionState = .blueCanvasA
@@ -906,13 +1056,13 @@ struct ShareExtensionView: View {
     }
     
     private func verifyAndRegisterAsNew() {
-        shareExtensionLogger.info("🔑 [登记新文件] verifyAndRegisterAsNew 被调用")
-        shareExtensionLogger.info("🔑 [登记新文件] 输入密码长度: \(capturedPassword.count)")
-        shareExtensionLogger.info("🔑 [登记新文件] 输入密码内容: \(capturedPassword)")
-        shareExtensionLogger.info("🔑 [登记新文件] tempFilePath: \(tempFilePath?.path ?? "nil")")
+        shareExtensionLogger.info("🔑 [识别到新文件] verifyAndRegisterAsNew 被调用")
+        shareExtensionLogger.info("🔑 [识别到新文件] 输入密码长度: \(capturedPassword.count)")
+        shareExtensionLogger.info("🔑 [识别到新文件] 输入密码内容: \(capturedPassword)")
+        shareExtensionLogger.info("🔑 [识别到新文件] tempFilePath: \(tempFilePath?.path ?? "nil")")
         
         guard !capturedPassword.isEmpty, let tempURL = tempFilePath else {
-            shareExtensionLogger.error("❌ [登记新文件] 参数无效: 密码为空=\(capturedPassword.isEmpty), 文件路径为nil=\(tempFilePath == nil)")
+            shareExtensionLogger.error("❌ [识别到新文件] 参数无效: 密码为空=\(capturedPassword.isEmpty), 文件路径为nil=\(tempFilePath == nil)")
             verificationError = "请输入密码"
             return
         }
@@ -920,7 +1070,7 @@ struct ShareExtensionView: View {
         isVerifying = true
         verificationError = nil
         
-        shareExtensionLogger.info("🔑 [登记新文件] 开始密码验证，文件: \(tempURL.lastPathComponent)")
+        shareExtensionLogger.info("🔑 [识别到新文件] 开始密码验证，文件: \(tempURL.lastPathComponent)")
         
         OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: tempURL, password: capturedPassword) { result in
             
@@ -931,7 +1081,7 @@ struct ShareExtensionView: View {
             case .failure(let error):
                 resultDescription = "failure(\(error.localizedDescription))"
             }
-            shareExtensionLogger.info("🔑 [登记新文件] 密码验证回调返回: \(resultDescription)")
+            shareExtensionLogger.info("🔑 [识别到新文件] 密码验证回调返回: \(resultDescription)")
             
             DispatchQueue.main.async {
                 self.isVerifying = false
@@ -939,14 +1089,14 @@ struct ShareExtensionView: View {
                 switch result {
                 case .success(let verified):
                     if verified {
-                        shareExtensionLogger.info("✅ [登记新文件] 密码验证通过，开始注册")
+                        shareExtensionLogger.info("✅ [识别到新文件] 密码验证通过，开始注册")
                         self.registerNewFile(password: self.capturedPassword)
                     } else {
-                        shareExtensionLogger.warning("⚠️ [登记新文件] 密码验证失败")
+                        shareExtensionLogger.warning("⚠️ [识别到新文件] 密码验证失败")
                         self.verificationError = "密码验证失败，请重试"
                     }
                 case .failure(let error):
-                    shareExtensionLogger.error("❌ [登记新文件] 密码验证异常: \(error.localizedDescription)")
+                    shareExtensionLogger.error("❌ [识别到新文件] 密码验证异常: \(error.localizedDescription)")
                     self.verificationError = error.localizedDescription
                 }
             }
@@ -1000,20 +1150,24 @@ struct ShareExtensionView: View {
     }
     
     private func registerNewFile(password: String) {
-        shareExtensionLogger.info("📝 [登记新文件] registerNewFile 被调用")
-        shareExtensionLogger.info("📝 [登记新文件] 密码长度: \(password.count)")
+        shareExtensionLogger.info("📝 [识别到新文件] registerNewFile 被调用")
+        shareExtensionLogger.info("📝 [识别到新文件] 密码长度: \(password.count)")
         
         guard let tempURL = tempFilePath else {
-            shareExtensionLogger.error("❌ [登记新文件] 文件路径无效")
+            shareExtensionLogger.error("❌ [识别到新文件] 文件路径无效")
             completeExtension(withError: "文件路径无效")
             return
         }
         
         let fileName = detectedFileName
+        let baseName = URL(fileURLWithPath: fileName).deletingPathExtension().lastPathComponent
+        let ext = URL(fileURLWithPath: fileName).pathExtension.isEmpty ? "" : ".\(URL(fileURLWithPath: fileName).pathExtension)"
         
         if fileNameExistsInVault(fileName: fileName) {
-            shareExtensionLogger.warning("⚠️ [登记新文件] 发现重名文件: \(fileName)")
-            newFileNameInput = fileName
+            shareExtensionLogger.warning("⚠️ [识别到新文件] 发现重名文件: \(fileName)")
+            newFileNameInput = baseName
+            fileExtension = ext
+            isSaveAsNewMode = false
             showRenameDialog = true
             return
         }
@@ -1034,29 +1188,29 @@ struct ShareExtensionView: View {
     }
     
     private func performRegisterNewFile(password: String, fileName: String) {
-        shareExtensionLogger.info("📝 [登记新文件] 开始注册，文件名: \(fileName)")
+        shareExtensionLogger.info("📝 [识别到新文件] 开始注册，文件名: \(fileName)")
         
         guard let tempURL = tempFilePath else {
-            shareExtensionLogger.error("❌ [登记新文件] 文件路径无效")
+            shareExtensionLogger.error("❌ [识别到新文件] 文件路径无效")
             completeExtension(withError: "文件路径无效")
             return
         }
         
         let uid = matchedUID.isEmpty ? generateUID() : matchedUID
         
-        shareExtensionLogger.info("📝 [登记新文件] 文件名: \(fileName) | UID: \(uid)")
+        shareExtensionLogger.info("📝 [识别到新文件] 文件名: \(fileName) | UID: \(uid)")
         
-        shareExtensionLogger.info("📝 [登记新文件] 开始写入 WPPM 标记")
+        shareExtensionLogger.info("📝 [识别到新文件] 开始写入 WPPM 标记")
         let writeSuccess = writeWppmMarkers(tempURL: tempURL, uid: uid, password: password)
-        shareExtensionLogger.info("📝 [登记新文件] WPPM 标记写入结果: \(writeSuccess)")
+        shareExtensionLogger.info("📝 [识别到新文件] WPPM 标记写入结果: \(writeSuccess)")
         
         if writeSuccess {
-            shareExtensionLogger.info("📝 [登记新文件] 开始迁移到保险箱")
+            shareExtensionLogger.info("📝 [识别到新文件] 开始迁移到保险箱")
             let moveSuccess = moveToSafeVaultSync(tempURL: tempURL, newFileName: fileName)
-            shareExtensionLogger.info("📝 [登记新文件] 迁移结果: \(moveSuccess)")
+            shareExtensionLogger.info("📝 [识别到新文件] 迁移结果: \(moveSuccess)")
             
             if moveSuccess {
-                shareExtensionLogger.info("📝 [登记新文件] 开始保存数据库记录")
+                shareExtensionLogger.info("📝 [识别到新文件] 开始保存数据库记录")
                 let dbSuccess = AppGroupDBManager.shared.saveFileMapping(
                     fileName: fileName,
                     uid: uid,
@@ -1064,21 +1218,21 @@ struct ShareExtensionView: View {
                     fileSize: fileSize,
                     isLocalVault: 1
                 )
-                shareExtensionLogger.info("📝 [登记新文件] 数据库保存结果: \(dbSuccess)")
+                shareExtensionLogger.info("📝 [识别到新文件] 数据库保存结果: \(dbSuccess)")
                 
                 if dbSuccess {
-                    shareExtensionLogger.info("✅ [登记新文件] 所有步骤成功完成")
+                    shareExtensionLogger.info("✅ [识别到新文件] 所有步骤成功完成")
                     completeExtension()
                 } else {
-                    shareExtensionLogger.error("❌ [登记新文件] 数据库保存失败")
+                    shareExtensionLogger.error("❌ [识别到新文件] 数据库保存失败")
                     completeExtension(withError: "数据库保存失败")
                 }
             } else {
-                shareExtensionLogger.error("❌ [登记新文件] 文件迁移失败")
+                shareExtensionLogger.error("❌ [识别到新文件] 文件迁移失败")
                 completeExtension(withError: "文件迁移失败")
             }
         } else {
-            shareExtensionLogger.error("❌ [登记新文件] WPPM 标记写入失败")
+            shareExtensionLogger.error("❌ [识别到新文件] WPPM 标记写入失败")
             completeExtension(withError: "写入标记失败")
         }
     }
@@ -1091,10 +1245,21 @@ struct ShareExtensionView: View {
             return
         }
         
+        let fullFileName = "\(trimmedName)\(fileExtension)"
+        
+        if fileNameExistsInVault(fileName: fullFileName) {
+            verificationError = "文件名已存在，请输入其他名称"
+            return
+        }
+        
         showRenameDialog = false
         verificationError = nil
         
-        performRegisterNewFile(password: capturedPassword, fileName: trimmedName)
+        if isSaveAsNewMode {
+            performSaveAsNew(newFileName: fullFileName)
+        } else {
+            performRegisterNewFile(password: capturedPassword, fileName: fullFileName)
+        }
     }
     
     private func moveToSafeVaultSync(tempURL: URL, newFileName: String) -> Bool {
@@ -1158,8 +1323,42 @@ struct ShareExtensionView: View {
         
         shareExtensionLogger.info("🔄 [同步覆盖] 目标: \(fileName) | UID: \(uid)")
         
+        if capturedPassword.isEmpty {
+            showPasswordInputDialog = true
+            pendingAction = .syncOverride
+            return
+        }
+        
+        isVerifying = true
+        
+        OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: tempURL, password: capturedPassword) { result in
+            Task { @MainActor in
+                self.isVerifying = false
+                
+                switch result {
+                case .success(let verified):
+                    if verified {
+                        self.performSyncOverride(fileName: fileName, uid: uid, password: self.capturedPassword)
+                    } else {
+                        self.showPasswordInputDialog = true
+                        self.pendingAction = .syncOverride
+                    }
+                case .failure(let error):
+                    self.showPasswordInputDialog = true
+                    self.pendingAction = .syncOverride
+                }
+            }
+        }
+    }
+    
+    private func performSyncOverride(fileName: String, uid: String, password: String) {
+        guard let tempURL = tempFilePath else {
+            completeExtension(withError: "文件路径无效")
+            return
+        }
+        
         Task.detached {
-            let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: nil)
+            let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: password)
             
             if success {
                 let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
@@ -1169,7 +1368,7 @@ struct ShareExtensionView: View {
                         _ = AppGroupDBManager.shared.saveFileMapping(
                             fileName: fileName,
                             uid: uid,
-                            passwordHash: capturedPassword,
+                            passwordHash: password,
                             fileSize: fileSize,
                             isLocalVault: 1
                         )
@@ -1187,6 +1386,38 @@ struct ShareExtensionView: View {
         }
     }
     
+    private func verifyPasswordAndSaveAsNewFromBlueB() {
+        guard let tempURL = tempFilePath else {
+            completeExtension(withError: "文件路径无效")
+            return
+        }
+        
+        if capturedPassword.isEmpty {
+            verificationError = "请输入密码"
+            return
+        }
+        
+        isVerifying = true
+        
+        OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: tempURL, password: capturedPassword) { result in
+            Task { @MainActor in
+                self.isVerifying = false
+                
+                switch result {
+                case .success(let verified):
+                    if verified {
+                        self.verificationError = nil
+                        self.saveAsNewAction()
+                    } else {
+                        self.verificationError = "密码验证失败，请重试"
+                    }
+                case .failure(let error):
+                    self.verificationError = error.localizedDescription
+                }
+            }
+        }
+    }
+    
     private func saveAsNewAction() {
         guard let tempURL = tempFilePath else {
             completeExtension(withError: "文件路径无效")
@@ -1195,15 +1426,76 @@ struct ShareExtensionView: View {
         
         let baseName = URL(fileURLWithPath: detectedFileName).deletingPathExtension().lastPathComponent
         let ext = URL(fileURLWithPath: detectedFileName).pathExtension.isEmpty ? "" : ".\(URL(fileURLWithPath: detectedFileName).pathExtension)"
-        let timestamp = String(Date().timeIntervalSince1970).prefix(10)
-        let newFileName = "\(baseName)_sync_\(timestamp)\(ext)"
         
-        let uid = generateUID()
+        newFileNameInput = baseName
+        fileExtension = ext
+        isSaveAsNewMode = true
+        showRenameDialog = true
+    }
+    
+    private func confirmSaveAsNew() {
+        let trimmedName = newFileNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if trimmedName.isEmpty {
+            verificationError = "文件名不能为空"
+            return
+        }
+        
+        if fileNameExistsInVault(fileName: trimmedName) {
+            verificationError = "文件名已存在，请输入其他名称"
+            return
+        }
+        
+        if capturedPassword.isEmpty {
+            showPasswordInputDialog = true
+            pendingAction = .saveAsNew(newFileName: trimmedName)
+            return
+        }
+        
+        guard let tempURL = tempFilePath else {
+            completeExtension(withError: "文件路径无效")
+            return
+        }
+        
+        isVerifying = true
+        
+        OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: tempURL, password: capturedPassword) { result in
+            Task { @MainActor in
+                self.isVerifying = false
+                
+                switch result {
+                case .success(let verified):
+                    if verified {
+                        self.showRenameDialog = false
+                        self.verificationError = nil
+                        self.performSaveAsNew(newFileName: trimmedName, password: self.capturedPassword)
+                    } else {
+                        self.showPasswordInputDialog = true
+                        self.pendingAction = .saveAsNew(newFileName: trimmedName)
+                    }
+                case .failure(let error):
+                    self.showPasswordInputDialog = true
+                    self.pendingAction = .saveAsNew(newFileName: trimmedName)
+                }
+            }
+        }
+    }
+    
+    private func performSaveAsNew(newFileName: String, password: String? = nil) {
+        guard let tempURL = tempFilePath else {
+            completeExtension(withError: "文件路径无效")
+            return
+        }
+        
+        let fileOwnUid = ZipExtraFieldManager.shared.readUid(from: tempURL)
+        let uid = fileOwnUid ?? generateUID()
+        
+        let finalPassword = password ?? capturedPassword
         
         shareExtensionLogger.info("➕ [另存为新文件] 新文件名: \(newFileName) | UID: \(uid)")
         
         Task.detached {
-            let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: nil)
+            let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: finalPassword)
             
             if success {
                 let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: newFileName)
@@ -1231,98 +1523,35 @@ struct ShareExtensionView: View {
         }
     }
     
-    private func overrideWithNewPassword() {
-        guard !capturedPassword.isEmpty, let tempURL = tempFilePath else {
-            verificationError = "请输入密码"
+    private func verifyAndShowAssetSelectionFromBlueA() {
+        guard let tempURL = tempFilePath else {
+            completeExtension(withError: "文件路径无效")
+            return
+        }
+        
+        if capturedPassword.isEmpty {
+            showPasswordInputDialog = true
+            pendingAction = .associateOverride
             return
         }
         
         isVerifying = true
-        verificationError = nil
         
         OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: tempURL, password: capturedPassword) { result in
             Task { @MainActor in
-                isVerifying = false
+                self.isVerifying = false
                 
                 switch result {
                 case .success(let verified):
                     if verified {
-                        if !matchedUID.isEmpty {
-                            let fileName = detectedFileName
-                            let uid = matchedUID
-                            let password = capturedPassword
-                            shareExtensionLogger.info("🔄 [保留身份] 使用文件原有UID: \(uid)")
-                            
-                            Task.detached {
-                                let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: password)
-                                
-                                if success {
-                                    let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
-                                    
-                                    await MainActor.run {
-                                        if moveSuccess {
-                                            _ = AppGroupDBManager.shared.saveFileMapping(
-                                                fileName: fileName,
-                                                uid: uid,
-                                                passwordHash: capturedPassword,
-                                                fileSize: self.fileSize,
-                                                isLocalVault: 1
-                                            )
-                                            self.completeExtension()
-                                        } else {
-                                            self.completeExtension(withError: "文件迁移失败")
-                                        }
-                                    }
-                                } else {
-                                    await MainActor.run {
-                                        self.completeExtension(withError: "写入标记失败")
-                                    }
-                                }
-                            }
-                        } else {
-                            let fileName = detectedFileName
-                            let existingRecords = AppGroupDBManager.shared.queryRecordsByFileName(fileName: fileName)
-                            
-                            if let existingRecord = existingRecords.first {
-                                let uid = existingRecord.uid
-                                let password = capturedPassword
-                                shareExtensionLogger.info("🔄 [覆盖同名] 使用老UID: \(uid)")
-                                
-                                Task.detached {
-                                    let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: password)
-                                    
-                                    if success {
-                                        let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
-                                        
-                                        await MainActor.run {
-                                            if moveSuccess {
-                                                _ = AppGroupDBManager.shared.saveFileMapping(
-                                                    fileName: fileName,
-                                                    uid: uid,
-                                                    passwordHash: capturedPassword,
-                                                    fileSize: self.fileSize,
-                                                    isLocalVault: 1
-                                                )
-                                                self.completeExtension()
-                                            } else {
-                                                self.completeExtension(withError: "文件迁移失败")
-                                            }
-                                        }
-                                    } else {
-                                        await MainActor.run {
-                                            self.completeExtension(withError: "写入标记失败")
-                                        }
-                                    }
-                                }
-                            } else {
-                                registerNewFile(password: capturedPassword)
-                            }
-                        }
+                        self.showAssetSelection()
                     } else {
-                        verificationError = "密码验证失败，请重试"
+                        self.showPasswordInputDialog = true
+                        self.pendingAction = .associateOverride
                     }
                 case .failure(let error):
-                    verificationError = error.localizedDescription
+                    self.showPasswordInputDialog = true
+                    self.pendingAction = .associateOverride
                 }
             }
         }
@@ -1347,30 +1576,49 @@ struct ShareExtensionView: View {
         
         shareExtensionLogger.info("🎯 [状态D] 选择资产: \(fileName) | UID(数据库): \(record.uid) | UID(文件尾部): \(targetUid)")
         
-        Task.detached {
-            let success = writeWppmMarkers(tempURL: tempURL, uid: targetUid, password: password)
-            
-            if success {
-                let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
+        isVerifying = true
+        
+        OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: tempURL, password: password) { result in
+            Task { @MainActor in
+                self.isVerifying = false
                 
-                await MainActor.run {
-                    if moveSuccess {
-                            _ = AppGroupDBManager.shared.saveFileMapping(
-                                fileName: fileName,
-                                uid: targetUid,
-                                passwordHash: capturedPassword,
-                                fileSize: self.fileSize,
-                                isLocalVault: 1
-                            )
-                            shareExtensionLogger.info("✅ [状态D] 覆盖成功")
-                        self.completeExtension()
+                switch result {
+                case .success(let verified):
+                    if verified {
+                        Task.detached {
+                            let success = writeWppmMarkers(tempURL: tempURL, uid: targetUid, password: password)
+                            
+                            if success {
+                                let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
+                                
+                                await MainActor.run {
+                                    if moveSuccess {
+                                        _ = AppGroupDBManager.shared.saveFileMapping(
+                                            fileName: fileName,
+                                            uid: targetUid,
+                                            passwordHash: password,
+                                            fileSize: self.fileSize,
+                                            isLocalVault: 1
+                                        )
+                                        shareExtensionLogger.info("✅ [状态D] 覆盖成功")
+                                        self.completeExtension()
+                                    } else {
+                                        self.completeExtension(withError: "文件迁移失败")
+                                    }
+                                }
+                            } else {
+                                await MainActor.run {
+                                    self.completeExtension(withError: "写入标记失败")
+                                }
+                            }
+                        }
                     } else {
-                        self.completeExtension(withError: "文件迁移失败")
+                        self.showPasswordInputDialog = true
+                        self.pendingAction = .associateOverride
                     }
-                }
-            } else {
-                await MainActor.run {
-                    self.completeExtension(withError: "写入标记失败")
+                case .failure(let error):
+                    self.showPasswordInputDialog = true
+                    self.pendingAction = .associateOverride
                 }
             }
         }
