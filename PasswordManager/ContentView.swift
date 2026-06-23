@@ -1,9 +1,72 @@
 import SwiftUI
 import OSLog
 import UIKit
+import Combine
+
+class DocumentInteractionManager: ObservableObject {
+    @Published private(set) var isPreviewing = false
+    private var docController: UIDocumentInteractionController?
+    private var delegate: DocumentInteractionDelegate?
+    
+    func openFile(url: URL, uid: String, fileName: String, presentingViewController: UIViewController) {
+        appLogger.info("🔍 优先尝试唤起外部应用打开文件")
+        UIApplication.shared.open(url) { [weak self] success in
+            if success {
+                appLogger.info("✅ 外部应用打开成功")
+                
+                DispatchQueue.global().async {
+                    AppGroupDBManager.shared.updateAccessTime(uid: uid)
+                    appLogger.info("📅 已更新文件访问时间: \(fileName)")
+                }
+                
+                DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+                    self?.cleanupTempFile(url: url)
+                }
+            } else {
+                appLogger.info("❌ 外部应用打开失败，降级到系统预览")
+                self?.presentSystemPreview(url: url, uid: uid, fileName: fileName, presentingViewController: presentingViewController)
+            }
+        }
+    }
+    
+    private func presentSystemPreview(url: URL, uid: String, fileName: String, presentingViewController: UIViewController) {
+        docController = UIDocumentInteractionController(url: url)
+        delegate = DocumentInteractionDelegate(
+            tempFileURL: url,
+            uid: uid,
+            fileName: fileName,
+            presentingViewController: presentingViewController,
+            manager: self
+        )
+        docController?.delegate = delegate
+        isPreviewing = true
+        docController?.presentPreview(animated: true)
+    }
+    
+    func previewDidEnd() {
+        isPreviewing = false
+        docController = nil
+        delegate = nil
+    }
+    
+    private func cleanupTempFile(url: URL) {
+        DispatchQueue.global().async {
+            do {
+                if FileManager.default.fileExists(atPath: url.path) {
+                    try FileManager.default.removeItem(at: url)
+                    appLogger.info("🗑️ 临时文件已清理")
+                }
+            } catch {
+                appLogger.error("❌ 清理临时文件失败: \(error)")
+            }
+        }
+    }
+}
 
 struct ContentView: View {
     @State private var records: [FileMappingRecord] = []
+    @State private var filteredRecords: [FileMappingRecord] = []
+    @State private var searchText = ""
     @State private var selectedRecord: FileMappingRecord?
     @State private var isRefreshing = false
     @State private var deleteConfirmRecord: FileMappingRecord?
@@ -11,26 +74,41 @@ struct ContentView: View {
     @State private var toastMessage: String?
     @State private var toastVisible = false
     
+    private var searchIndex: SearchIndex = SearchIndex()
+    @StateObject private var docInteractionManager = DocumentInteractionManager()
+    
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(records, id: \.uid) { record in
-                    AssetRow(record: record, onTap: {
-                        openFile(record: record)
-                    }, onLockTap: {
-                        selectedRecord = record
-                    })
-                }
-                .onDelete(perform: requestDelete)
+            VStack(spacing: 0) {
+                SearchBar(text: $searchText)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color(.systemBackground))
                 
-                if records.isEmpty {
-                    Text("暂无资产记录")
-                        .foregroundColor(.gray)
-                        .frame(maxWidth: .infinity, minHeight: 200)
+                List {
+                    ForEach(filteredRecords, id: \.uid) { record in
+                        AssetRow(record: record, onTap: {
+                            openFile(record: record)
+                        }, onLockTap: {
+                            selectedRecord = record
+                        })
+                    }
+                    .onDelete(perform: requestDelete)
+                    
+                    if filteredRecords.isEmpty {
+                        Text(searchText.isEmpty ? "暂无资产记录" : "未找到匹配的资产")
+                            .foregroundColor(.gray)
+                            .frame(maxWidth: .infinity, minHeight: 200)
+                    }
+                }
+                .listStyle(.plain)
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    EmptyView()
                 }
             }
-            .navigationTitle("资产保险箱")
-            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button(action: refreshList) {
@@ -43,6 +121,9 @@ struct ContentView: View {
             }
             .onAppear {
                 loadRecords()
+            }
+            .onChange(of: searchText) {
+                filterRecords()
             }
             .sheet(item: $selectedRecord) { record in
                 AssetDetailView(record: record)
@@ -84,10 +165,21 @@ struct ContentView: View {
         isRefreshing = true
         DispatchQueue.global().async {
             let allRecords = AppGroupDBManager.shared.queryAllLocalVaultRecords()
+            let sortedRecords = allRecords.sorted { $0.last_access_time > $1.last_access_time }
+            searchIndex.buildIndex(records: sortedRecords)
             DispatchQueue.main.async {
-                records = allRecords.sorted { $0.last_access_time > $1.last_access_time }
+                records = sortedRecords
+                filterRecords()
                 isRefreshing = false
             }
+        }
+    }
+    
+    private func filterRecords() {
+        if searchText.isEmpty {
+            filteredRecords = records
+        } else {
+            filteredRecords = searchIndex.search(query: searchText)
         }
     }
     
@@ -186,39 +278,13 @@ struct ContentView: View {
                     try FileManager.default.copyItem(at: fileURL, to: tempFileURL)
                     appLogger.info("📤 文件已复制到临时目录: \(tempFileURL.path)")
                     
-                    appLogger.info("🚀 直接打开文件")
-                    UIApplication.shared.open(tempFileURL) { success in
-                        if success {
-                            appLogger.info("✅ 文件打开成功")
-                            
-                            DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
-                                do {
-                                    if FileManager.default.fileExists(atPath: tempFileURL.path) {
-                                        try FileManager.default.removeItem(at: tempFileURL)
-                                        appLogger.info("🗑️ 临时文件已清理")
-                                    }
-                                } catch {
-                                    appLogger.error("❌ 清理临时文件失败: \(error)")
-                                }
-                            }
-                            
-                            DispatchQueue.global().async {
-                                AppGroupDBManager.shared.updateAccessTime(uid: record.uid)
-                                appLogger.info("📅 已更新文件访问时间: \(record.file_name)")
-                            }
-                        } else {
-                            appLogger.error("❌ 文件打开失败")
-                            
-                            do {
-                                if FileManager.default.fileExists(atPath: tempFileURL.path) {
-                                    try FileManager.default.removeItem(at: tempFileURL)
-                                    appLogger.info("🗑️ 打开失败，清理临时文件")
-                                }
-                            } catch {
-                                appLogger.error("❌ 清理临时文件失败: \(error)")
-                            }
-                        }
-                    }
+                    appLogger.info("🚀 使用文档交互管理器打开文件")
+                            docInteractionManager.openFile(
+                                url: tempFileURL,
+                                uid: record.uid,
+                                fileName: record.file_name,
+                                presentingViewController: topVC
+                            )
                 } catch {
                     appLogger.error("❌ 复制文件失败: \(error)")
                 }
@@ -497,6 +563,186 @@ struct InfoRow: View {
             Text(value)
                 .font(.caption)
                 .fontWeight(.medium)
+        }
+    }
+}
+
+struct SearchBar: View {
+    @Binding var text: String
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.gray)
+            
+            TextField("请输入文件名", text: $text)
+                .textFieldStyle(.plain)
+            
+            if !text.isEmpty {
+                Button(action: {
+                    text = ""
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.gray)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(12)
+    }
+}
+
+class SearchIndex {
+    private var index: [String: [FileMappingRecord]] = [:]
+    private var allRecords: [FileMappingRecord] = []
+    
+    func buildIndex(records: [FileMappingRecord]) {
+        allRecords = records
+        index.removeAll()
+        
+        for record in records {
+            let tokens = tokenize(text: record.file_name)
+            for token in tokens {
+                if index[token] == nil {
+                    index[token] = []
+                }
+                if !index[token]!.contains(where: { $0.uid == record.uid }) {
+                    index[token]!.append(record)
+                }
+            }
+        }
+    }
+    
+    func search(query: String) -> [FileMappingRecord] {
+        let queryTokens = tokenize(text: query)
+        
+        if queryTokens.isEmpty {
+            return allRecords
+        }
+        
+        var results: [FileMappingRecord] = []
+        
+        if let firstToken = queryTokens.first, let firstRecords = index[firstToken] {
+            results = firstRecords
+            
+            for token in queryTokens.dropFirst() {
+                if let matchedRecords = index[token] {
+                    results = results.filter { record in
+                        matchedRecords.contains { $0.uid == record.uid }
+                    }
+                } else {
+                    results = []
+                    break
+                }
+            }
+        }
+        
+        results.sort { record1, record2 in
+            let score1 = calculateScore(record: record1, query: query)
+            let score2 = calculateScore(record: record2, query: query)
+            return score1 > score2
+        }
+        
+        return results
+    }
+    
+    private func tokenize(text: String) -> [String] {
+        var tokens: [String] = []
+        let lowerText = text.lowercased()
+        
+        for i in 0..<lowerText.count {
+            let start = lowerText.index(lowerText.startIndex, offsetBy: i)
+            for j in i..<min(i + 2, lowerText.count) {
+                let end = lowerText.index(lowerText.startIndex, offsetBy: j + 1)
+                let substring = String(lowerText[start..<end])
+                if !substring.isEmpty {
+                    tokens.append(substring)
+                }
+            }
+        }
+        
+        return Array(Set(tokens))
+    }
+    
+    private func calculateScore(record: FileMappingRecord, query: String) -> Int {
+        let fileName = record.file_name.lowercased()
+        let queryLower = query.lowercased()
+        var score = 0
+        
+        if fileName.hasPrefix(queryLower) {
+            score += 100
+        }
+        
+        if fileName == queryLower {
+            score += 200
+        }
+        
+        let matchCount = queryLower.reduce(0) { count, char in
+            fileName.contains(char) ? count + 1 : count
+        }
+        score += matchCount * 10
+        
+        return score
+    }
+}
+
+class DocumentInteractionDelegate: NSObject, UIDocumentInteractionControllerDelegate {
+    private let tempFileURL: URL
+    private let uid: String
+    private let fileName: String
+    private weak var presentingViewController: UIViewController?
+    private weak var manager: DocumentInteractionManager?
+    
+    init(tempFileURL: URL, uid: String, fileName: String, presentingViewController: UIViewController, manager: DocumentInteractionManager) {
+        self.tempFileURL = tempFileURL
+        self.uid = uid
+        self.fileName = fileName
+        self.presentingViewController = presentingViewController
+        self.manager = manager
+    }
+    
+    func documentInteractionControllerViewControllerForPreview(_ controller: UIDocumentInteractionController) -> UIViewController {
+        return presentingViewController ?? UIViewController()
+    }
+    
+    func documentInteractionControllerDidEndPreview(_ controller: UIDocumentInteractionController) {
+        appLogger.info("📱 文档预览已关闭")
+        manager?.previewDidEnd()
+        cleanupTempFile()
+    }
+    
+    func documentInteractionControllerDidDismissOpenInMenu(_ controller: UIDocumentInteractionController) {
+        appLogger.info("📱 打开方式菜单已关闭")
+        manager?.previewDidEnd()
+        cleanupTempFile()
+    }
+    
+    func documentInteractionController(_ controller: UIDocumentInteractionController, didEndSendingToApplication application: String?) {
+        appLogger.info("📤 已发送到应用: \(application ?? "未知")")
+        manager?.previewDidEnd()
+        
+        DispatchQueue.global().async {
+            AppGroupDBManager.shared.updateAccessTime(uid: self.uid)
+            appLogger.info("📅 已更新文件访问时间: \(self.fileName)")
+        }
+        
+        DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+            self.cleanupTempFile()
+        }
+    }
+    
+    private func cleanupTempFile() {
+        DispatchQueue.global().async {
+            do {
+                if FileManager.default.fileExists(atPath: self.tempFileURL.path) {
+                    try FileManager.default.removeItem(at: self.tempFileURL)
+                    appLogger.info("🗑️ 临时文件已清理")
+                }
+            } catch {
+                appLogger.error("❌ 清理临时文件失败: \(error)")
+            }
         }
     }
 }
