@@ -472,7 +472,7 @@ struct ShareExtensionView: View {
             
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    ForEach(assetList, id: \.uid) { record in
+                    ForEach(assetList, id: \.id) { record in
                         Button(action: { selectAsset(record: record) }) {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(record.file_name)
@@ -862,14 +862,6 @@ struct ShareExtensionView: View {
                 hasPasswordInMetadata = false
             }
             
-            _ = AppGroupDBManager.shared.upsertRecord(
-                uid: uid,
-                fileName: fileName,
-                passwordHash: capturedPassword,
-                fileSize: fileSize,
-                isLocalVault: 0
-            )
-            
             actionState = .greenCanvas
         } else {
             shareExtensionLogger.error("❌ [通路1] 无法提取UID，降级到野生文件")
@@ -1049,7 +1041,21 @@ struct ShareExtensionView: View {
         }
         
         if !matchedUID.isEmpty {
-            _ = AppGroupDBManager.shared.updateAccessTime(uid: matchedUID)
+            let existingRecords = AppGroupDBManager.shared.queryRecordsByUID(uid: matchedUID)
+            if !existingRecords.isEmpty {
+                shareExtensionLogger.info("✅ [通路1] 数据库已有同UID记录，仅更新访问时间")
+                let ids = existingRecords.map { $0.id }
+                _ = AppGroupDBManager.shared.updateAccessTime(ids: ids)
+            } else {
+                shareExtensionLogger.info("✅ [通路1] 数据库无同UID记录，插入新记录")
+                _ = AppGroupDBManager.shared.insertRecord(
+                    uid: matchedUID,
+                    fileName: detectedFileName,
+                    passwordHash: capturedPassword,
+                    fileSize: fileSize,
+                    isLocalVault: 0
+                )
+            }
         }
         
         completeExtension()

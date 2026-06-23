@@ -5,10 +5,12 @@ import OSLog
 let dbLogger = Logger(subsystem: "com.greenet.PasswordManager", category: "Database")
 
 struct FileMappingRecord: Identifiable {
-    let id: String
+    let id: Int64
     let uid: String
     let file_name: String
     let password_hash: String
+    let create_time: Int64
+    let update_time: Int64
     let last_access_time: Int64
     let file_size: Int64
     let is_local_vault: Int
@@ -59,16 +61,21 @@ final class AppGroupDBManager {
         execute(sql: "PRAGMA busy_timeout = 2000;")
         execute(sql: """
             CREATE TABLE IF NOT EXISTS file_mapping_table (
-                uid TEXT PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uid TEXT NOT NULL,
                 file_name TEXT NOT NULL,
                 password_hash TEXT NOT NULL,
+                create_time INTEGER NOT NULL,
+                update_time INTEGER NOT NULL,
                 last_access_time INTEGER NOT NULL,
                 file_size INTEGER NOT NULL,
                 is_local_vault INTEGER DEFAULT 0
             );
         """)
-        execute(sql: "CREATE INDEX IF NOT EXISTS idx_filename_size ON file_mapping_table(file_name, file_size);")
+        execute(sql: "CREATE INDEX IF NOT EXISTS idx_uid ON file_mapping_table(uid);")
         execute(sql: "CREATE INDEX IF NOT EXISTS idx_access_time ON file_mapping_table(last_access_time);")
+        execute(sql: "CREATE INDEX IF NOT EXISTS idx_update_time ON file_mapping_table(update_time);")
+        execute(sql: "CREATE INDEX IF NOT EXISTS idx_filename_size ON file_mapping_table(file_name, file_size);")
     }
 
     private func execute(sql: String) {
@@ -87,44 +94,31 @@ final class AppGroupDBManager {
     }
 
     func saveFileMapping(fileName: String, uid: String, passwordHash: String, fileSize: Int64, isLocalVault: Int) -> Bool {
-        return upsertRecord(uid: uid, fileName: fileName, passwordHash: passwordHash, fileSize: fileSize, isLocalVault: isLocalVault)
-    }
-
-    func fetchAllLog() -> String {
-        let sql = "SELECT uid, file_name, password_hash, last_access_time, file_size, is_local_vault FROM file_mapping_table ORDER BY last_access_time DESC;"
-        var stmt: OpaquePointer?
-        var result = ""
-
-        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                if let cUid = sqlite3_column_text(stmt, 0),
-                   let cName = sqlite3_column_text(stmt, 1),
-                   let cHash = sqlite3_column_text(stmt, 2) {
-                    let uid = String(cString: cUid)
-                    let name = String(cString: cName)
-                    let hash = String(cString: cHash)
-                    let accessTime = sqlite3_column_int64(stmt, 3)
-                    let fileSize = sqlite3_column_int64(stmt, 4)
-                    let isLocal = sqlite3_column_int(stmt, 5)
-
-                    let dateFormatter = DateFormatter()
-                    dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-                    let accessDate = Date(timeIntervalSince1970: TimeInterval(accessTime))
-                    let formattedDate = dateFormatter.string(from: accessDate)
-
-                    result += "📄 文件: \(name) | UID: \(uid) | Hash: \(hash.prefix(8))... | last_access: \(accessTime) (\(formattedDate)) | size: \(fileSize) | vault: \(isLocal)\n"
-                }
-            }
+        let existingRecords = queryRecordsByUID(uid: uid)
+        if let firstRecord = existingRecords.first {
+            return updateRecord(
+                id: firstRecord.id,
+                fileName: fileName,
+                passwordHash: passwordHash,
+                fileSize: fileSize,
+                isLocalVault: isLocalVault
+            )
+        } else {
+            return insertRecord(
+                uid: uid,
+                fileName: fileName,
+                passwordHash: passwordHash,
+                fileSize: fileSize,
+                isLocalVault: isLocalVault
+            )
         }
-        sqlite3_finalize(stmt)
-        return result.isEmpty ? "数据库当前为空" : result
     }
 
-    func upsertRecord(uid: String, fileName: String, passwordHash: String, fileSize: Int64, isLocalVault: Int) -> Bool {
+    func insertRecord(uid: String, fileName: String, passwordHash: String, fileSize: Int64, isLocalVault: Int) -> Bool {
         let normalizedName = normalizeFileName(fileName)
         let timestamp = Int64(Date().timeIntervalSince1970)
 
-        let sql = "INSERT OR REPLACE INTO file_mapping_table (uid, file_name, password_hash, last_access_time, file_size, is_local_vault) VALUES (?, ?, ?, ?, ?, ?);"
+        let sql = "INSERT INTO file_mapping_table (uid, file_name, password_hash, create_time, update_time, last_access_time, file_size, is_local_vault) VALUES (?, ?, ?, ?, ?, ?, ?, ?);"
 
         for attempt in 0..<3 {
             var stmt: OpaquePointer?
@@ -134,14 +128,17 @@ final class AppGroupDBManager {
                 sqlite3_bind_text(stmt, 2, (normalizedName as NSString).utf8String, -1, nil)
                 sqlite3_bind_text(stmt, 3, (passwordHash as NSString).utf8String, -1, nil)
                 sqlite3_bind_int64(stmt, 4, timestamp)
-                sqlite3_bind_int64(stmt, 5, fileSize)
-                sqlite3_bind_int(stmt, 6, Int32(isLocalVault))
+                sqlite3_bind_int64(stmt, 5, timestamp)
+                sqlite3_bind_int64(stmt, 6, timestamp)
+                sqlite3_bind_int64(stmt, 7, fileSize)
+                sqlite3_bind_int(stmt, 8, Int32(isLocalVault))
 
                 let result = sqlite3_step(stmt)
                 sqlite3_finalize(stmt)
 
                 if result == SQLITE_DONE {
-                    dbLogger.info("✅ [DB] 资产写入成功 | UID: \(uid, privacy: .public) | 文件: \(normalizedName, privacy: .public) | vault: \(isLocalVault)")
+                    let newId = sqlite3_last_insert_rowid(db)
+                    dbLogger.info("✅ [DB] 记录插入成功 | ID: \(newId) | UID: \(uid, privacy: .public) | 文件: \(normalizedName, privacy: .public) | vault: \(isLocalVault)")
                     return true
                 }
             }
@@ -151,42 +148,127 @@ final class AppGroupDBManager {
             }
         }
 
-        dbLogger.error("❌ [DB] 资产写入失败 | UID: \(uid, privacy: .public) | 文件: \(normalizedName, privacy: .public)")
+        dbLogger.error("❌ [DB] 记录插入失败 | UID: \(uid, privacy: .public) | 文件: \(normalizedName, privacy: .public)")
+        return false
+    }
+
+    func updateRecord(id: Int64, fileName: String, passwordHash: String, fileSize: Int64, isLocalVault: Int) -> Bool {
+        let normalizedName = normalizeFileName(fileName)
+        let timestamp = Int64(Date().timeIntervalSince1970)
+
+        let sql = "UPDATE file_mapping_table SET file_name = ?, password_hash = ?, update_time = ?, last_access_time = ?, file_size = ?, is_local_vault = ? WHERE id = ?;"
+
+        for attempt in 0..<3 {
+            var stmt: OpaquePointer?
+
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+                sqlite3_bind_text(stmt, 1, (normalizedName as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(stmt, 2, (passwordHash as NSString).utf8String, -1, nil)
+                sqlite3_bind_int64(stmt, 3, timestamp)
+                sqlite3_bind_int64(stmt, 4, timestamp)
+                sqlite3_bind_int64(stmt, 5, fileSize)
+                sqlite3_bind_int(stmt, 6, Int32(isLocalVault))
+                sqlite3_bind_int64(stmt, 7, id)
+
+                let result = sqlite3_step(stmt)
+                sqlite3_finalize(stmt)
+
+                if result == SQLITE_DONE {
+                    let changes = sqlite3_changes(db)
+                    if changes > 0 {
+                        dbLogger.info("✅ [DB] 记录更新成功 | ID: \(id) | 文件: \(normalizedName, privacy: .public) | vault: \(isLocalVault)")
+                        return true
+                    }
+                }
+            }
+
+            if attempt < 2 {
+                Thread.sleep(forTimeInterval: 0.3)
+            }
+        }
+
+        dbLogger.error("❌ [DB] 记录更新失败 | ID: \(id)")
+        return false
+    }
+
+    func upsertRecord(uid: String, fileName: String, passwordHash: String, fileSize: Int64, isLocalVault: Int) -> Bool {
+        let existingRecords = queryRecordsByUID(uid: uid)
+        if let firstRecord = existingRecords.first {
+            return updateRecord(
+                id: firstRecord.id,
+                fileName: fileName,
+                passwordHash: passwordHash,
+                fileSize: fileSize,
+                isLocalVault: isLocalVault
+            )
+        } else {
+            return insertRecord(
+                uid: uid,
+                fileName: fileName,
+                passwordHash: passwordHash,
+                fileSize: fileSize,
+                isLocalVault: isLocalVault
+            )
+        }
+    }
+
+    func updateAccessTime(ids: [Int64]) -> Bool {
+        guard !ids.isEmpty else {
+            return true
+        }
+
+        let timestamp = Int64(Date().timeIntervalSince1970)
+        let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+        let sql = "UPDATE file_mapping_table SET last_access_time = ? WHERE id IN (\(placeholders));"
+
+        for attempt in 0..<3 {
+            var stmt: OpaquePointer?
+
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+                sqlite3_bind_int64(stmt, 1, timestamp)
+                for (index, id) in ids.enumerated() {
+                    sqlite3_bind_int64(stmt, Int32(index + 2), id)
+                }
+
+                let result = sqlite3_step(stmt)
+                sqlite3_finalize(stmt)
+
+                if result == SQLITE_DONE {
+                    let changes = sqlite3_changes(db)
+                    if changes > 0 {
+                        dbLogger.info("✅ [DB] 批量访问时间更新成功 | 更新记录数: \(changes)")
+                        return true
+                    }
+                }
+            }
+
+            if attempt < 2 {
+                Thread.sleep(forTimeInterval: 0.3)
+            }
+        }
+
+        dbLogger.error("❌ [DB] 批量访问时间更新失败")
         return false
     }
 
     func updateAccessTime(uid: String) -> Bool {
-        let timestamp = Int64(Date().timeIntervalSince1970)
-        let sql = "UPDATE file_mapping_table SET last_access_time = ? WHERE uid = ?;"
-
-        var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_int64(stmt, 1, timestamp)
-            sqlite3_bind_text(stmt, 2, (uid as NSString).utf8String, -1, nil)
-
-            let result = sqlite3_step(stmt)
-            sqlite3_finalize(stmt)
-
-            if result == SQLITE_DONE {
-                let changes = sqlite3_changes(db)
-                if changes > 0 {
-                    dbLogger.info("✅ [DB] 访问时间更新成功 | UID: \(uid, privacy: .public)")
-                    return true
-                }
-            }
+        let records = queryRecordsByUID(uid: uid)
+        if records.isEmpty {
+            return false
         }
-
-        dbLogger.error("❌ [DB] 访问时间更新失败 | UID: \(uid, privacy: .public)")
-        return false
+        let ids = records.map { $0.id }
+        return updateAccessTime(ids: ids)
     }
 
-    func updateVaultStatus(uid: String, isLocalVault: Int) -> Bool {
-        let sql = "UPDATE file_mapping_table SET is_local_vault = ? WHERE uid = ?;"
+    func updateVaultStatus(id: Int64, isLocalVault: Int) -> Bool {
+        let sql = "UPDATE file_mapping_table SET is_local_vault = ?, update_time = ? WHERE id = ?;"
+        let timestamp = Int64(Date().timeIntervalSince1970)
 
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_int(stmt, 1, Int32(isLocalVault))
-            sqlite3_bind_text(stmt, 2, (uid as NSString).utf8String, -1, nil)
+            sqlite3_bind_int64(stmt, 2, timestamp)
+            sqlite3_bind_int64(stmt, 3, id)
 
             let result = sqlite3_step(stmt)
             sqlite3_finalize(stmt)
@@ -194,14 +276,74 @@ final class AppGroupDBManager {
             if result == SQLITE_DONE {
                 let changes = sqlite3_changes(db)
                 if changes > 0 {
-                    dbLogger.info("✅ [DB] Vault状态更新成功 | UID: \(uid, privacy: .public) | vault: \(isLocalVault)")
+                    dbLogger.info("✅ [DB] Vault状态更新成功 | ID: \(id) | vault: \(isLocalVault)")
                     return true
                 }
             }
         }
 
-        dbLogger.error("❌ [DB] Vault状态更新失败 | UID: \(uid, privacy: .public)")
+        dbLogger.error("❌ [DB] Vault状态更新失败 | ID: \(id)")
         return false
+    }
+
+    func updateVaultStatus(uid: String, isLocalVault: Int) -> Bool {
+        let records = queryRecordsByUID(uid: uid)
+        if records.isEmpty {
+            return false
+        }
+        var success = true
+        for record in records {
+            if !updateVaultStatus(id: record.id, isLocalVault: isLocalVault) {
+                success = false
+            }
+        }
+        return success
+    }
+
+    func fetchAllLog() -> String {
+        let sql = "SELECT id, uid, file_name, password_hash, create_time, update_time, last_access_time, file_size, is_local_vault FROM file_mapping_table ORDER BY last_access_time DESC;"
+        var stmt: OpaquePointer?
+        var result = ""
+
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let id = sqlite3_column_int64(stmt, 0)
+                if let cUid = sqlite3_column_text(stmt, 1),
+                   let cName = sqlite3_column_text(stmt, 2),
+                   let cHash = sqlite3_column_text(stmt, 3) {
+                    let uid = String(cString: cUid)
+                    let name = String(cString: cName)
+                    let hash = String(cString: cHash)
+                    let createTime = sqlite3_column_int64(stmt, 4)
+                    let updateTime = sqlite3_column_int64(stmt, 5)
+                    let accessTime = sqlite3_column_int64(stmt, 6)
+                    let fileSize = sqlite3_column_int64(stmt, 7)
+                    let isLocal = sqlite3_column_int(stmt, 8)
+
+                    let dateFormatter = DateFormatter()
+                    dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+                    let createDate = Date(timeIntervalSince1970: TimeInterval(createTime))
+                    let updateDate = Date(timeIntervalSince1970: TimeInterval(updateTime))
+                    let accessDate = Date(timeIntervalSince1970: TimeInterval(accessTime))
+                    
+                    let formattedCreateTime = dateFormatter.string(from: createDate)
+                    let formattedUpdateTime = dateFormatter.string(from: updateDate)
+                    let formattedAccessTime = dateFormatter.string(from: accessDate)
+
+                    let isLocalStr = isLocal == 1 ? "已落盘" : "未落盘"
+
+                    result += "📄 文件: \(name)\n"
+                    result += "   ID: \(id) | UID: \(uid)\n"
+                    result += "   Hash: \(hash.prefix(8))...\n"
+                    result += "   创建时间: \(createTime) (\(formattedCreateTime))\n"
+                    result += "   修改时间: \(updateTime) (\(formattedUpdateTime))\n"
+                    result += "   访问时间: \(accessTime) (\(formattedAccessTime))\n"
+                    result += "   大小: \(fileSize) | 状态: \(isLocalStr)\n\n"
+                }
+            }
+        }
+        sqlite3_finalize(stmt)
+        return result.isEmpty ? "数据库当前为空" : result
     }
 
     func queryUID(forFileName fileName: String) -> String? {
@@ -226,40 +368,46 @@ final class AppGroupDBManager {
         return resultUID
     }
 
-    func queryRecordByUID(uid: String) -> FileMappingRecord? {
-        let sql = "SELECT uid, file_name, password_hash, last_access_time, file_size, is_local_vault FROM file_mapping_table WHERE uid = ?;"
+    func queryRecordsByUID(uid: String) -> [FileMappingRecord] {
+        let sql = "SELECT id, uid, file_name, password_hash, create_time, update_time, last_access_time, file_size, is_local_vault FROM file_mapping_table WHERE uid = ?;"
 
         var stmt: OpaquePointer?
-        var record: FileMappingRecord?
+        var records: [FileMappingRecord] = []
 
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_text(stmt, 1, (uid as NSString).utf8String, -1, nil)
 
-            if sqlite3_step(stmt) == SQLITE_ROW {
-                if let cUid = sqlite3_column_text(stmt, 0),
-                   let cName = sqlite3_column_text(stmt, 1),
-                   let cHash = sqlite3_column_text(stmt, 2) {
-                    record = FileMappingRecord(
-                        id: String(cString: cUid),
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let cUid = sqlite3_column_text(stmt, 1),
+                   let cName = sqlite3_column_text(stmt, 2),
+                   let cHash = sqlite3_column_text(stmt, 3) {
+                    records.append(FileMappingRecord(
+                        id: sqlite3_column_int64(stmt, 0),
                         uid: String(cString: cUid),
                         file_name: String(cString: cName),
                         password_hash: String(cString: cHash),
-                        last_access_time: sqlite3_column_int64(stmt, 3),
-                        file_size: sqlite3_column_int64(stmt, 4),
-                        is_local_vault: Int(sqlite3_column_int(stmt, 5))
-                    )
+                        create_time: sqlite3_column_int64(stmt, 4),
+                        update_time: sqlite3_column_int64(stmt, 5),
+                        last_access_time: sqlite3_column_int64(stmt, 6),
+                        file_size: sqlite3_column_int64(stmt, 7),
+                        is_local_vault: Int(sqlite3_column_int(stmt, 8))
+                    ))
                 }
             }
         }
 
         sqlite3_finalize(stmt)
-        return record
+        return records
+    }
+
+    func queryRecordByUID(uid: String) -> FileMappingRecord? {
+        return queryRecordsByUID(uid: uid).first
     }
 
     func queryRecordsByFileName(fileName: String) -> [FileMappingRecord] {
         let normalizedName = normalizeFileName(fileName)
 
-        let sql = "SELECT uid, file_name, password_hash, last_access_time, file_size, is_local_vault FROM file_mapping_table WHERE file_name LIKE ? ORDER BY last_access_time DESC;"
+        let sql = "SELECT id, uid, file_name, password_hash, create_time, update_time, last_access_time, file_size, is_local_vault FROM file_mapping_table WHERE file_name LIKE ? ORDER BY last_access_time DESC;"
 
         var stmt: OpaquePointer?
         var records: [FileMappingRecord] = []
@@ -269,17 +417,19 @@ final class AppGroupDBManager {
             sqlite3_bind_text(stmt, 1, (likePattern as NSString).utf8String, -1, nil)
 
             while sqlite3_step(stmt) == SQLITE_ROW {
-                if let cUid = sqlite3_column_text(stmt, 0),
-                   let cName = sqlite3_column_text(stmt, 1),
-                   let cHash = sqlite3_column_text(stmt, 2) {
+                if let cUid = sqlite3_column_text(stmt, 1),
+                   let cName = sqlite3_column_text(stmt, 2),
+                   let cHash = sqlite3_column_text(stmt, 3) {
                     records.append(FileMappingRecord(
-                        id: String(cString: cUid),
+                        id: sqlite3_column_int64(stmt, 0),
                         uid: String(cString: cUid),
                         file_name: String(cString: cName),
                         password_hash: String(cString: cHash),
-                        last_access_time: sqlite3_column_int64(stmt, 3),
-                        file_size: sqlite3_column_int64(stmt, 4),
-                        is_local_vault: Int(sqlite3_column_int(stmt, 5))
+                        create_time: sqlite3_column_int64(stmt, 4),
+                        update_time: sqlite3_column_int64(stmt, 5),
+                        last_access_time: sqlite3_column_int64(stmt, 6),
+                        file_size: sqlite3_column_int64(stmt, 7),
+                        is_local_vault: Int(sqlite3_column_int(stmt, 8))
                     ))
                 }
             }
@@ -290,7 +440,7 @@ final class AppGroupDBManager {
     }
 
     func queryTopActiveRecords(limit: Int) -> [FileMappingRecord] {
-        let sql = "SELECT uid, file_name, password_hash, last_access_time, file_size, is_local_vault FROM file_mapping_table ORDER BY last_access_time DESC LIMIT ?;"
+        let sql = "SELECT id, uid, file_name, password_hash, create_time, update_time, last_access_time, file_size, is_local_vault FROM file_mapping_table ORDER BY last_access_time DESC LIMIT ?;"
 
         var stmt: OpaquePointer?
         var records: [FileMappingRecord] = []
@@ -299,17 +449,19 @@ final class AppGroupDBManager {
             sqlite3_bind_int(stmt, 1, Int32(limit))
 
             while sqlite3_step(stmt) == SQLITE_ROW {
-                if let cUid = sqlite3_column_text(stmt, 0),
-                   let cName = sqlite3_column_text(stmt, 1),
-                   let cHash = sqlite3_column_text(stmt, 2) {
+                if let cUid = sqlite3_column_text(stmt, 1),
+                   let cName = sqlite3_column_text(stmt, 2),
+                   let cHash = sqlite3_column_text(stmt, 3) {
                     records.append(FileMappingRecord(
-                        id: String(cString: cUid),
+                        id: sqlite3_column_int64(stmt, 0),
                         uid: String(cString: cUid),
                         file_name: String(cString: cName),
                         password_hash: String(cString: cHash),
-                        last_access_time: sqlite3_column_int64(stmt, 3),
-                        file_size: sqlite3_column_int64(stmt, 4),
-                        is_local_vault: Int(sqlite3_column_int(stmt, 5))
+                        create_time: sqlite3_column_int64(stmt, 4),
+                        update_time: sqlite3_column_int64(stmt, 5),
+                        last_access_time: sqlite3_column_int64(stmt, 6),
+                        file_size: sqlite3_column_int64(stmt, 7),
+                        is_local_vault: Int(sqlite3_column_int(stmt, 8))
                     ))
                 }
             }
@@ -320,24 +472,55 @@ final class AppGroupDBManager {
     }
 
     func queryAllLocalVaultRecords() -> [FileMappingRecord] {
-        let sql = "SELECT uid, file_name, password_hash, last_access_time, file_size, is_local_vault FROM file_mapping_table WHERE is_local_vault = 1 ORDER BY last_access_time ASC;"
+        let sql = "SELECT id, uid, file_name, password_hash, create_time, update_time, last_access_time, file_size, is_local_vault FROM file_mapping_table WHERE is_local_vault = 1 ORDER BY last_access_time ASC;"
 
         var stmt: OpaquePointer?
         var records: [FileMappingRecord] = []
 
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             while sqlite3_step(stmt) == SQLITE_ROW {
-                if let cUid = sqlite3_column_text(stmt, 0),
-                   let cName = sqlite3_column_text(stmt, 1),
-                   let cHash = sqlite3_column_text(stmt, 2) {
+                if let cUid = sqlite3_column_text(stmt, 1),
+                   let cName = sqlite3_column_text(stmt, 2),
+                   let cHash = sqlite3_column_text(stmt, 3) {
                     records.append(FileMappingRecord(
-                        id: String(cString: cUid),
+                        id: sqlite3_column_int64(stmt, 0),
                         uid: String(cString: cUid),
                         file_name: String(cString: cName),
                         password_hash: String(cString: cHash),
-                        last_access_time: sqlite3_column_int64(stmt, 3),
-                        file_size: sqlite3_column_int64(stmt, 4),
-                        is_local_vault: Int(sqlite3_column_int(stmt, 5))
+                        create_time: sqlite3_column_int64(stmt, 4),
+                        update_time: sqlite3_column_int64(stmt, 5),
+                        last_access_time: sqlite3_column_int64(stmt, 6),
+                        file_size: sqlite3_column_int64(stmt, 7),
+                        is_local_vault: Int(sqlite3_column_int(stmt, 8))
+                    ))
+                }
+            }
+        }
+        sqlite3_finalize(stmt)
+        return records
+    }
+    
+    func queryNonLocalVaultRecords() -> [FileMappingRecord] {
+        let sql = "SELECT id, uid, file_name, password_hash, create_time, update_time, last_access_time, file_size, is_local_vault FROM file_mapping_table WHERE is_local_vault = 0 ORDER BY last_access_time ASC;"
+
+        var stmt: OpaquePointer?
+        var records: [FileMappingRecord] = []
+
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let cUid = sqlite3_column_text(stmt, 1),
+                   let cName = sqlite3_column_text(stmt, 2),
+                   let cHash = sqlite3_column_text(stmt, 3) {
+                    records.append(FileMappingRecord(
+                        id: sqlite3_column_int64(stmt, 0),
+                        uid: String(cString: cUid),
+                        file_name: String(cString: cName),
+                        password_hash: String(cString: cHash),
+                        create_time: sqlite3_column_int64(stmt, 4),
+                        update_time: sqlite3_column_int64(stmt, 5),
+                        last_access_time: sqlite3_column_int64(stmt, 6),
+                        file_size: sqlite3_column_int64(stmt, 7),
+                        is_local_vault: Int(sqlite3_column_int(stmt, 8))
                     ))
                 }
             }
@@ -347,15 +530,22 @@ final class AppGroupDBManager {
         return records
     }
 
-    func deleteRecord(uid: String) -> Bool {
-        let sql = "DELETE FROM file_mapping_table WHERE uid = ?;"
+    func deleteRecord(ids: [Int64]) -> Bool {
+        guard !ids.isEmpty else {
+            return true
+        }
 
-        var stmt: OpaquePointer?
+        let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+        let sql = "DELETE FROM file_mapping_table WHERE id IN (\(placeholders));"
+
         var success = false
 
         for attempt in 0..<3 {
+            var stmt: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                sqlite3_bind_text(stmt, 1, (uid as NSString).utf8String, -1, nil)
+                for (index, id) in ids.enumerated() {
+                    sqlite3_bind_int64(stmt, Int32(index + 1), id)
+                }
 
                 let result = sqlite3_step(stmt)
                 success = (result == SQLITE_DONE)
@@ -371,38 +561,30 @@ final class AppGroupDBManager {
         }
 
         if success {
-            dbLogger.info("✅ [DB] 记录删除成功 | UID: \(uid, privacy: .public)")
+            dbLogger.info("✅ [DB] 批量记录删除成功 | 删除记录数: \(ids.count)")
         } else {
-            dbLogger.error("❌ [DB] 记录删除失败 | UID: \(uid, privacy: .public)")
+            dbLogger.error("❌ [DB] 批量记录删除失败")
         }
 
         return success
     }
 
+    func deleteRecord(uid: String) -> Bool {
+        let records = queryRecordsByUID(uid: uid)
+        if records.isEmpty {
+            return false
+        }
+        let ids = records.map { $0.id }
+        return deleteRecord(ids: ids)
+    }
+
     func deleteRecordByFileName(fileName: String) -> Bool {
         let normalizedName = normalizeFileName(fileName)
-        let sql = "DELETE FROM file_mapping_table WHERE file_name = ?;"
-
-        var stmt: OpaquePointer?
-        var success = false
-
-        for attempt in 0..<3 {
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                sqlite3_bind_text(stmt, 1, (normalizedName as NSString).utf8String, -1, nil)
-
-                let result = sqlite3_step(stmt)
-                success = (result == SQLITE_DONE)
-
-                sqlite3_finalize(stmt)
-            }
-
-            if success { break }
-
-            if attempt < 2 {
-                Thread.sleep(forTimeInterval: 0.3)
-            }
+        let records = queryRecordsByFileName(fileName: normalizedName)
+        if records.isEmpty {
+            return false
         }
-
-        return success
+        let ids = records.map { $0.id }
+        return deleteRecord(ids: ids)
     }
 }

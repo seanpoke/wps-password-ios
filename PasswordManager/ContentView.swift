@@ -73,6 +73,9 @@ struct ContentView: View {
     @State private var showDeleteAlert = false
     @State private var toastMessage: String?
     @State private var toastVisible = false
+    @State private var showDebugView = false
+    @State private var searchBarTapCount = 0
+    @State private var lastTapTime = Date()
     
     private var searchIndex: SearchIndex = SearchIndex()
     @StateObject private var docInteractionManager = DocumentInteractionManager()
@@ -85,8 +88,11 @@ struct ContentView: View {
                     .padding(.vertical, 12)
                     .background(Color(.systemBackground))
                 
+                Divider()
+                    .padding(.horizontal, 16)
+                
                 List {
-                    ForEach(filteredRecords, id: \.uid) { record in
+                    ForEach(filteredRecords, id: \.id) { record in
                         AssetRow(record: record, onTap: {
                             openFile(record: record)
                         }, onLockTap: {
@@ -102,6 +108,26 @@ struct ContentView: View {
                     }
                 }
                 .listStyle(.plain)
+                .onTapGesture {
+                    let now = Date()
+                    let timeDiff = now.timeIntervalSince(lastTapTime)
+                    appLogger.info("🔍 [三击检测] 列表区域点击触发 | 时间差: \(timeDiff) | 当前计数: \(searchBarTapCount)")
+                    
+                    if timeDiff < 0.5 {
+                        searchBarTapCount += 1
+                    } else {
+                        searchBarTapCount = 1
+                    }
+                    lastTapTime = now
+                    
+                    appLogger.info("🔍 [三击检测] 更新计数: \(searchBarTapCount)")
+                    
+                    if searchBarTapCount >= 3 {
+                        appLogger.info("🔍 [三击检测] 三击达成，打开调试页面")
+                        searchBarTapCount = 0
+                        showDebugView = true
+                    }
+                }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -115,6 +141,9 @@ struct ContentView: View {
                         Image(systemName: "arrow.clockwise")
                     }
                 }
+            }
+            .sheet(isPresented: $showDebugView) {
+                DebugDatabaseView()
             }
             .refreshable {
                 await loadRecords()
@@ -213,8 +242,8 @@ struct ContentView: View {
             if FileManager.default.fileExists(atPath: fileURL.path) {
                 try FileManager.default.removeItem(at: fileURL)
             }
-            AppGroupDBManager.shared.deleteRecord(uid: record.uid)
-            records.removeAll { $0.uid == record.uid }
+            AppGroupDBManager.shared.deleteRecord(ids: [record.id])
+            loadRecords()
         } catch {
             appLogger.error("❌ 删除文件失败: \(error)")
         }
@@ -608,7 +637,7 @@ class SearchIndex {
                 if index[token] == nil {
                     index[token] = []
                 }
-                if !index[token]!.contains(where: { $0.uid == record.uid }) {
+                if !index[token]!.contains(where: { $0.id == record.id }) {
                     index[token]!.append(record)
                 }
             }
@@ -630,7 +659,7 @@ class SearchIndex {
             for token in queryTokens.dropFirst() {
                 if let matchedRecords = index[token] {
                     results = results.filter { record in
-                        matchedRecords.contains { $0.uid == record.uid }
+                        matchedRecords.contains { $0.id == record.id }
                     }
                 } else {
                     results = []
@@ -744,6 +773,69 @@ class DocumentInteractionDelegate: NSObject, UIDocumentInteractionControllerDele
                 appLogger.error("❌ 清理临时文件失败: \(error)")
             }
         }
+    }
+}
+
+struct DebugDatabaseView: View {
+    @State private var dbLog = ""
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                ScrollView {
+                    Text(dbLog)
+                        .font(.system(size: 11))
+                        .foregroundColor(.gray)
+                        .padding(16)
+                        .textSelection(.enabled)
+                }
+                
+                Divider()
+                
+                HStack(spacing: 12) {
+                    Button(action: refreshDBLog) {
+                        Text("刷新")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .padding()
+                            .frame(maxWidth: .infinity)
+                            .background(Color.blue)
+                            .cornerRadius(12)
+                    }
+                    
+                    Button(action: clearDB) {
+                        Text("清空")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .padding()
+                            .frame(maxWidth: .infinity)
+                            .background(Color.red)
+                            .cornerRadius(12)
+                    }
+                }
+                .padding(16)
+            }
+            .navigationTitle("数据库调试")
+            .onAppear {
+                refreshDBLog()
+            }
+        }
+    }
+    
+    private func refreshDBLog() {
+        dbLog = AppGroupDBManager.shared.fetchAllLog()
+    }
+    
+    private func clearDB() {
+        let records = AppGroupDBManager.shared.queryNonLocalVaultRecords()
+        let ids = records.map { $0.id }
+        if ids.isEmpty {
+            appLogger.info("🔍 [调试页面] 没有未落盘数据可清空")
+        } else {
+            _ = AppGroupDBManager.shared.deleteRecord(ids: ids)
+            appLogger.info("🔍 [调试页面] 已清空 \(ids.count) 条未落盘数据")
+        }
+        refreshDBLog()
     }
 }
 
