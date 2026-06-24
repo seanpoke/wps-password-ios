@@ -369,7 +369,7 @@ final class AppGroupDBManager {
     }
 
     func queryRecordsByUID(uid: String) -> [FileMappingRecord] {
-        let sql = "SELECT id, uid, file_name, password_hash, create_time, update_time, last_access_time, file_size, is_local_vault FROM file_mapping_table WHERE uid = ?;"
+        let sql = "SELECT id, uid, file_name, password_hash, create_time, update_time, last_access_time, file_size, is_local_vault FROM file_mapping_table WHERE uid = ? ORDER BY is_local_vault DESC, last_access_time DESC;"
 
         var stmt: OpaquePointer?
         var records: [FileMappingRecord] = []

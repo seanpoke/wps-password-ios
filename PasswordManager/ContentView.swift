@@ -29,7 +29,7 @@ class DocumentInteractionManager: ObservableObject {
         }
     }
     
-    private func presentSystemPreview(url: URL, uid: String, fileName: String, presentingViewController: UIViewController) {
+    func presentSystemPreview(url: URL, uid: String, fileName: String, presentingViewController: UIViewController) {
         docController = UIDocumentInteractionController(url: url)
         delegate = DocumentInteractionDelegate(
             tempFileURL: url,
@@ -97,6 +97,8 @@ struct ContentView: View {
                             openFile(record: record)
                         }, onLockTap: {
                             selectedRecord = record
+                        }, onPreviewTap: {
+                            openFilePreview(record: record)
                         })
                     }
                     .onDelete(perform: requestDelete)
@@ -110,20 +112,15 @@ struct ContentView: View {
                 .listStyle(.plain)
                 .onTapGesture {
                     let now = Date()
-                    let timeDiff = now.timeIntervalSince(lastTapTime)
-                    appLogger.info("🔍 [三击检测] 列表区域点击触发 | 时间差: \(timeDiff) | 当前计数: \(searchBarTapCount)")
-                    
+                    let timeDiff = now.timeIntervalSince(lastTapTime)                    
                     if timeDiff < 0.5 {
                         searchBarTapCount += 1
                     } else {
                         searchBarTapCount = 1
                     }
                     lastTapTime = now
-                    
-                    appLogger.info("🔍 [三击检测] 更新计数: \(searchBarTapCount)")
-                    
+                                        
                     if searchBarTapCount >= 3 {
-                        appLogger.info("🔍 [三击检测] 三击达成，打开调试页面")
                         searchBarTapCount = 0
                         showDebugView = true
                     }
@@ -250,6 +247,14 @@ struct ContentView: View {
     }
     
     private func openFile(record: FileMappingRecord) {
+        copyFileAndOpen(record: record, usePreview: false)
+    }
+    
+    private func openFilePreview(record: FileMappingRecord) {
+        copyFileAndOpen(record: record, usePreview: true)
+    }
+    
+    private func copyFileAndOpen(record: FileMappingRecord, usePreview: Bool) {
         let appGroupID = "group.com.greenet.PasswordManager"
         let safeVaultDir = "SafeVault"
         
@@ -307,13 +312,31 @@ struct ContentView: View {
                     try FileManager.default.copyItem(at: fileURL, to: tempFileURL)
                     appLogger.info("📤 文件已复制到临时目录: \(tempFileURL.path)")
                     
-                    appLogger.info("🚀 使用文档交互管理器打开文件")
-                            docInteractionManager.openFile(
+                    if usePreview {
+                        appLogger.info("🚀 使用文档交互管理器直接预览文件")
+                        DispatchQueue.global().async {
+                            AppGroupDBManager.shared.updateAccessTime(uid: record.uid)
+                            appLogger.info("📅 已更新文件访问时间: \(record.file_name)")
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            self.docInteractionManager.presentSystemPreview(
                                 url: tempFileURL,
                                 uid: record.uid,
                                 fileName: record.file_name,
                                 presentingViewController: topVC
                             )
+                        }
+                    } else {
+                        appLogger.info("🚀 使用文档交互管理器打开文件")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            self.docInteractionManager.openFile(
+                                url: tempFileURL,
+                                uid: record.uid,
+                                fileName: record.file_name,
+                                presentingViewController: topVC
+                            )
+                        }
+                    }
                 } catch {
                     appLogger.error("❌ 复制文件失败: \(error)")
                 }
@@ -353,6 +376,7 @@ struct AssetRow: View {
     let record: FileMappingRecord
     let onTap: () -> Void
     let onLockTap: () -> Void
+    let onPreviewTap: () -> Void
     
     var body: some View {
         HStack(spacing: 16) {
@@ -381,10 +405,16 @@ struct AssetRow: View {
             
             Spacer()
             
-            // Lock button is NOT part of the tappable area
+            Button(action: onPreviewTap) {
+                Image(systemName: "eye.fill")
+                    .foregroundColor(.gray)
+                    .font(.title2)
+            }
+            .buttonStyle(.plain)
+            
             Button(action: onLockTap) {
-                Image(systemName: record.is_local_vault == 1 ? "lock.fill" : "lock.open")
-                    .foregroundColor(record.is_local_vault == 1 ? .green : .orange)
+                Image(systemName: "info.circle")
+                    .foregroundColor(.gray)
                     .font(.title2)
             }
             .buttonStyle(.plain)
@@ -416,145 +446,114 @@ struct AssetRow: View {
 struct FileIconView: View {
     let fileName: String
     
-    private var iconInfo: (name: String, color: Color) {
+    private var iconInfo: (letter: String, bgColor: Color, fgColor: Color) {
         if fileName.hasSuffix(".docx") || fileName.hasSuffix(".doc") {
-            return ("doc.text", .blue)
+            return ("W", Color(red: 0.12, green: 0.33, blue: 0.73), .white)
         } else if fileName.hasSuffix(".xlsx") || fileName.hasSuffix(".xls") {
-            return ("table", .green)
+            return ("S", Color(red: 0.15, green: 0.58, blue: 0.24), .white)
         } else if fileName.hasSuffix(".pptx") || fileName.hasSuffix(".ppt") {
-            return ("doc.text.fill", .orange)
+            return ("P", Color(red: 0.92, green: 0.45, blue: 0.13), .white)
         } else if fileName.hasSuffix(".pdf") {
-            return ("doc", .red)
+            return ("P", Color(red: 0.79, green: 0.21, blue: 0.21), .white)
         } else {
-            return ("file", .gray)
+            return ("", Color(.secondarySystemBackground), .gray)
         }
     }
     
     var body: some View {
-        Image(systemName: iconInfo.name)
-            .font(.system(size: 32))
-            .foregroundColor(iconInfo.color)
-            .frame(width: 48, height: 48)
-            .background(Color(.secondarySystemBackground))
-            .cornerRadius(8)
+        ZStack {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(iconInfo.bgColor)
+                .frame(width: 44, height: 44)
+            
+            if !iconInfo.letter.isEmpty {
+                Text(iconInfo.letter)
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(iconInfo.fgColor)
+            } else {
+                Image(systemName: "file")
+                    .font(.system(size: 20))
+                    .foregroundColor(.gray)
+            }
+        }
     }
 }
 
 struct AssetDetailView: View {
     let record: FileMappingRecord
-    @State private var password: String?
-    @State private var isCopied = false
+    
+    private var fileType: String {
+        let lowerName = record.file_name.lowercased()
+        if lowerName.hasSuffix(".docx") {
+            return "DOCX"
+        } else if lowerName.hasSuffix(".doc") {
+            return "DOC"
+        } else if lowerName.hasSuffix(".xlsx") {
+            return "XLSX"
+        } else if lowerName.hasSuffix(".xls") {
+            return "XLS"
+        } else if lowerName.hasSuffix(".pptx") {
+            return "PPTX"
+        } else if lowerName.hasSuffix(".ppt") {
+            return "PPT"
+        } else if lowerName.hasSuffix(".pdf") {
+            return "PDF"
+        } else if lowerName.hasSuffix(".zip") {
+            return "ZIP"
+        } else {
+            if let ext = record.file_name.components(separatedBy: ".").last {
+                return ext.uppercased()
+            }
+            return "未知"
+        }
+    }
     
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
-                    FileIconView(fileName: record.file_name)
-                        .scaleEffect(2)
-                    
-                    VStack(spacing: 8) {
-                        Text(record.file_name)
-                            .font(.title)
-                            .fontWeight(.bold)
-                            .multilineTextAlignment(.center)
+                    VStack(spacing: 16) {
+                        Text("文件基本信息")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         
-                        HStack(spacing: 16) {
-                            InfoRow(label: "文件大小", value: formatFileSize(record.file_size))
-                            InfoRow(label: "最后访问", value: formatDate(record.last_access_time))
-                        }
-                        
-                        InfoRow(label: "存储位置", value: record.is_local_vault == 1 ? "本地保险箱" : "外部")
-                            .foregroundColor(record.is_local_vault == 1 ? .green : .orange)
+                        InfoRow(label: "文件名称", value: record.file_name)
+                        InfoRow(label: "文件类型", value: fileType)
+                        InfoRow(label: "文件大小", value: formatFileSize(record.file_size))
+                        InfoRow(label: "创建时间", value: formatDate(record.create_time))
+                        InfoRow(label: "修改时间", value: formatDate(record.update_time))
+                        InfoRow(label: "访问时间", value: formatDate(record.last_access_time))
                     }
                     
                     Divider()
                     
                     VStack(spacing: 16) {
-                        Text("解密密码")
+                        Text("文件元数据信息")
                             .font(.headline)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         
-                        if let password = password {
-                            VStack(spacing: 8) {
-                                Text(password)
-                                    .font(.title2)
-                                    .fontWeight(.bold)
-                                    .multilineTextAlignment(.center)
-                                    .padding()
-                                    .background(Color(.secondarySystemBackground))
-                                    .cornerRadius(8)
-                                    .lineLimit(nil)
-                                
-                                Button(action: copyPassword) {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
-                                        Text(isCopied ? "已复制" : "复制密码")
-                                    }
-                                    .font(.headline)
-                                    .foregroundColor(.white)
-                                    .padding()
-                                    .frame(maxWidth: .infinity)
-                                    .background(isCopied ? Color.green : Color.blue)
-                                    .cornerRadius(12)
-                                }
-                            }
-                        } else {
-                            ProgressView("读取密码中...")
-                        }
+                        InfoRow(label: "uid", value: record.uid)
+                        InfoRow(label: "密码", value: record.password_hash)
+                        InfoRow(label: "密钥版本", value: "1.0")
                     }
                     
+                    Divider()
+                    
                     VStack(spacing: 16) {
-                        Text("文件标识")
+                        Text("文档权限信息")
                             .font(.headline)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         
-                        Text(record.uid)
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .multilineTextAlignment(.center)
+                        Text("暂无权限信息")
+                            .font(.body)
+                            .foregroundColor(.gray)
+                            .frame(maxWidth: .infinity, alignment: .center)
                             .padding()
-                            .background(Color(.secondarySystemBackground))
-                            .cornerRadius(8)
-                            .lineLimit(nil)
                     }
                 }
                 .padding()
             }
-            .navigationTitle("资产详情")
-            .onAppear {
-                readPassword()
-            }
-        }
-    }
-    
-    private func readPassword() {
-        let appGroupID = "group.com.greenet.PasswordManager"
-        let safeVaultDir = "SafeVault"
-        
-        guard let containerURL = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: appGroupID
-        ) else {
-            return
-        }
-        
-        let vaultDir = containerURL.appendingPathComponent(safeVaultDir, isDirectory: true)
-        let fileURL = vaultDir.appendingPathComponent(record.file_name)
-        
-        DispatchQueue.global().async {
-            let passwordFromFile = ZipExtraFieldManager.shared.readPassword(from: fileURL)
-            DispatchQueue.main.async {
-                self.password = passwordFromFile ?? "未找到密码"
-            }
-        }
-    }
-    
-    private func copyPassword() {
-        guard let password = password else { return }
-        UIPasteboard.general.string = password
-        isCopied = true
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            isCopied = false
+            .navigationTitle("文件信息")
         }
     }
     
@@ -592,6 +591,7 @@ struct InfoRow: View {
             Text(value)
                 .font(.caption)
                 .fontWeight(.medium)
+                .textSelection(.enabled)
         }
     }
 }
@@ -739,6 +739,12 @@ class DocumentInteractionDelegate: NSObject, UIDocumentInteractionControllerDele
     func documentInteractionControllerDidEndPreview(_ controller: UIDocumentInteractionController) {
         appLogger.info("📱 文档预览已关闭")
         manager?.previewDidEnd()
+        
+        DispatchQueue.global().async {
+            AppGroupDBManager.shared.updateAccessTime(uid: self.uid)
+            appLogger.info("📅 已更新文件访问时间: \(self.fileName)")
+        }
+        
         cleanupTempFile()
     }
     

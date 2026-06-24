@@ -1182,15 +1182,55 @@ struct ShareExtensionView: View {
     }
     
     private func fileNameExistsInVault(fileName: String) -> Bool {
+        shareExtensionLogger.info("🔍 [保险箱检查] ===== fileNameExistsInVault 开始 =====")
+        shareExtensionLogger.info("🔍 [保险箱检查] 检查文件名: \(fileName)")
+        shareExtensionLogger.info("🔍 [保险箱检查] appGroupID: \(appGroupID)")
+        
         guard let containerURL = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: appGroupID
         ) else {
+            shareExtensionLogger.error("❌ [保险箱检查] 无法获取App Group容器，appGroupID=\(appGroupID)")
             return false
         }
         
+        shareExtensionLogger.info("🔍 [保险箱检查] App Group容器路径: \(containerURL.path)")
+        
         let vaultDir = containerURL.appendingPathComponent(safeVaultDir, isDirectory: true)
+        shareExtensionLogger.info("🔍 [保险箱检查] 保险箱目录路径: \(vaultDir.path)")
+        shareExtensionLogger.info("🔍 [保险箱检查] safeVaultDir常量值: \(safeVaultDir)")
+        
+        // 确保保险箱目录存在，否则文件检查会失败
+        let vaultDirExists = FileManager.default.fileExists(atPath: vaultDir.path)
+        shareExtensionLogger.info("🔍 [保险箱检查] 保险箱目录是否存在: \(vaultDirExists)")
+        
+        if !vaultDirExists {
+            do {
+                try FileManager.default.createDirectory(at: vaultDir, withIntermediateDirectories: true)
+                shareExtensionLogger.info("📁 [保险箱检查] 创建保险箱目录成功: \(vaultDir.path)")
+            } catch {
+                shareExtensionLogger.error("❌ [保险箱检查] 创建保险箱目录失败: \(error)")
+                return false
+            }
+        }
+        
         let destURL = vaultDir.appendingPathComponent(fileName)
-        return FileManager.default.fileExists(atPath: destURL.path)
+        shareExtensionLogger.info("🔍 [保险箱检查] 目标文件完整路径: \(destURL.path)")
+        
+        let exists = FileManager.default.fileExists(atPath: destURL.path)
+        shareExtensionLogger.info("🔍 [保险箱检查] 文件存在检查结果: \(exists)")
+        
+        // 列出保险箱目录中的所有文件，帮助排查
+        do {
+            let files = try FileManager.default.contentsOfDirectory(atPath: vaultDir.path)
+            shareExtensionLogger.info("🔍 [保险箱检查] 保险箱中现有文件列表: \(files.count)个文件")
+            for file in files {
+                shareExtensionLogger.info("🔍 [保险箱检查]   - \(file)")
+            }
+        } catch {
+            shareExtensionLogger.warning("⚠️ [保险箱检查] 无法列出保险箱目录内容: \(error)")
+        }
+        
+        return exists
     }
     
     private func performRegisterNewFile(password: String, fileName: String) {
@@ -1244,26 +1284,42 @@ struct ShareExtensionView: View {
     }
     
     private func confirmRename() {
+        shareExtensionLogger.info("✅ [确认重命名] ===== confirmRename 开始 =====")
+        shareExtensionLogger.info("✅ [确认重命名] 用户输入: newFileNameInput=\(newFileNameInput)")
+        shareExtensionLogger.info("✅ [确认重命名] fileExtension=\(fileExtension)")
+        shareExtensionLogger.info("✅ [确认重命名] isSaveAsNewMode=\(isSaveAsNewMode)")
+        
         let trimmedName = newFileNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        shareExtensionLogger.info("✅ [确认重命名] 去空格后: trimmedName=\(trimmedName)")
         
         if trimmedName.isEmpty {
+            shareExtensionLogger.error("❌ [确认重命名] 文件名为空")
             verificationError = "文件名不能为空"
             return
         }
         
         let fullFileName = "\(trimmedName)\(fileExtension)"
+        shareExtensionLogger.info("✅ [确认重命名] 完整文件名: fullFileName=\(fullFileName)")
         
-        if fileNameExistsInVault(fileName: fullFileName) {
+        // 检查文件是否已存在
+        let existsInVault = fileNameExistsInVault(fileName: fullFileName)
+        shareExtensionLogger.info("✅ [确认重命名] fileNameExistsInVault 返回: \(existsInVault)")
+        
+        if existsInVault {
+            shareExtensionLogger.warning("⚠️ [确认重命名] 文件名已存在，阻止操作")
             verificationError = "文件名已存在，请输入其他名称"
             return
         }
         
+        shareExtensionLogger.info("✅ [确认重命名] 文件名检查通过，继续执行")
         showRenameDialog = false
         verificationError = nil
         
         if isSaveAsNewMode {
+            shareExtensionLogger.info("✅ [确认重命名] 调用 performSaveAsNew")
             performSaveAsNew(newFileName: fullFileName)
         } else {
+            shareExtensionLogger.info("✅ [确认重命名] 调用 performRegisterNewFile")
             performRegisterNewFile(password: capturedPassword, fileName: fullFileName)
         }
     }
@@ -1283,7 +1339,8 @@ struct ShareExtensionView: View {
             var destURL = vaultDir.appendingPathComponent(newFileName)
             
             if FileManager.default.fileExists(atPath: destURL.path) {
-                try FileManager.default.removeItem(at: destURL)
+                shareExtensionLogger.error("❌ [迁移同步] 目标文件已存在，拒绝覆盖: \(newFileName)")
+                return false
             }
             
             let coordinator = NSFileCoordinator()
@@ -1425,18 +1482,31 @@ struct ShareExtensionView: View {
     }
     
     private func saveAsNewAction() {
+        shareExtensionLogger.info("➕ [另存为] ===== saveAsNewAction 开始 =====")
+        shareExtensionLogger.info("➕ [另存为] detectedFileName: \(detectedFileName)")
+        shareExtensionLogger.info("➕ [另存为] matchedAssetName: \(matchedAssetName)")
+        shareExtensionLogger.info("➕ [另存为] matchedUID: \(matchedUID)")
+        
         guard let tempURL = tempFilePath else {
+            shareExtensionLogger.error("❌ [另存为] tempFilePath 为空")
             completeExtension(withError: "文件路径无效")
             return
         }
         
+        shareExtensionLogger.info("➕ [另存为] tempFilePath: \(tempURL.path)")
+        
         let baseName = URL(fileURLWithPath: detectedFileName).deletingPathExtension().lastPathComponent
         let ext = URL(fileURLWithPath: detectedFileName).pathExtension.isEmpty ? "" : ".\(URL(fileURLWithPath: detectedFileName).pathExtension)"
+        
+        shareExtensionLogger.info("➕ [另存为] 提取文件名: baseName=\(baseName), ext=\(ext)")
+        shareExtensionLogger.info("➕ [另存为] 默认新文件名: \(baseName)\(ext)")
         
         newFileNameInput = baseName
         fileExtension = ext
         isSaveAsNewMode = true
         showRenameDialog = true
+        
+        shareExtensionLogger.info("➕ [另存为] 显示重命名弹窗，isSaveAsNewMode=\(isSaveAsNewMode)")
     }
     
     private func confirmSaveAsNew() {
@@ -1488,33 +1558,52 @@ struct ShareExtensionView: View {
     }
     
     private func performSaveAsNew(newFileName: String, password: String? = nil) {
+        shareExtensionLogger.info("➕ [执行另存为] ===== performSaveAsNew 开始 =====")
+        shareExtensionLogger.info("➕ [执行另存为] 目标文件名: \(newFileName)")
+        shareExtensionLogger.info("➕ [执行另存为] 密码参数: \(password != nil ? "有" : "无")")
+        shareExtensionLogger.info("➕ [执行另存为] capturedPassword: \(capturedPassword)")
+        
         guard let tempURL = tempFilePath else {
+            shareExtensionLogger.error("❌ [执行另存为] tempFilePath 为空")
             completeExtension(withError: "文件路径无效")
             return
         }
         
+        shareExtensionLogger.info("➕ [执行另存为] tempFilePath: \(tempURL.path)")
+        
+        // 另存为新文件：优先复用文件尾部原有UID，没有再生成新UID
         let fileOwnUid = ZipExtraFieldManager.shared.readUid(from: tempURL)
+        shareExtensionLogger.info("➕ [执行另存为] 文件尾部原有UID: \(fileOwnUid ?? "无")")
+        
         let uid = fileOwnUid ?? generateUID()
+        shareExtensionLogger.info("➕ [执行另存为] 最终使用UID: \(uid)")
         
         let finalPassword = password ?? capturedPassword
+        shareExtensionLogger.info("➕ [执行另存为] 最终使用密码: \(finalPassword.prefix(8))...")
         
-        shareExtensionLogger.info("➕ [另存为新文件] 新文件名: \(newFileName) | UID: \(uid)")
+        shareExtensionLogger.info("➕ [执行另存为] 新文件名: \(newFileName) | UID: \(uid)")
         
         Task.detached {
+            shareExtensionLogger.info("➕ [执行另存为] 开始写入 WPPM 标记")
             let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: finalPassword)
+            shareExtensionLogger.info("➕ [执行另存为] WPPM 标记写入结果: \(success)")
             
             if success {
+                shareExtensionLogger.info("➕ [执行另存为] 开始迁移文件到保险箱")
                 let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: newFileName)
+                shareExtensionLogger.info("➕ [执行另存为] 文件迁移结果: \(moveSuccess)")
                 
                 await MainActor.run {
                     if moveSuccess {
-                        _ = AppGroupDBManager.shared.saveFileMapping(
-                            fileName: newFileName,
+                        // 另存为新文件：直接插入新记录，不触发 update（避免覆盖原文件记录）
+                        let insertSuccess = AppGroupDBManager.shared.insertRecord(
                             uid: uid,
+                            fileName: newFileName,
                             passwordHash: capturedPassword,
                             fileSize: fileSize,
                             isLocalVault: 1
                         )
+                        shareExtensionLogger.info("➕ [执行另存为] 数据库插入结果: \(insertSuccess)")
                         shareExtensionLogger.info("✅ [另存为新文件] 成功")
                         completeExtension()
                     } else {
@@ -1667,22 +1756,38 @@ struct ShareExtensionView: View {
     }
     
     private func moveToSafeVault(tempURL: URL, newFileName: String) async -> Bool {
+        shareExtensionLogger.info("📦 [迁移] ===== moveToSafeVault 开始 =====")
+        shareExtensionLogger.info("📦 [迁移] 源文件路径: \(tempURL.path)")
+        shareExtensionLogger.info("📦 [迁移] 目标文件名: \(newFileName)")
+        
         do {
             guard let containerURL = FileManager.default.containerURL(
                 forSecurityApplicationGroupIdentifier: appGroupID
             ) else {
-                shareExtensionLogger.error("❌ [迁移] 无法获取App Group容器")
+                shareExtensionLogger.error("❌ [迁移] 无法获取App Group容器，appGroupID=\(appGroupID)")
                 return false
             }
             
+            shareExtensionLogger.info("📦 [迁移] App Group容器路径: \(containerURL.path)")
+            
             let vaultDir = containerURL.appendingPathComponent(safeVaultDir, isDirectory: true)
+            shareExtensionLogger.info("📦 [迁移] 保险箱目录路径: \(vaultDir.path)")
+            
             try FileManager.default.createDirectory(at: vaultDir, withIntermediateDirectories: true)
+            shareExtensionLogger.info("📦 [迁移] 保险箱目录创建/确认成功")
             
             var destURL = vaultDir.appendingPathComponent(newFileName)
+            shareExtensionLogger.info("📦 [迁移] 目标文件完整路径: \(destURL.path)")
             
-            if FileManager.default.fileExists(atPath: destURL.path) {
-                try FileManager.default.removeItem(at: destURL)
+            let fileExists = FileManager.default.fileExists(atPath: destURL.path)
+            shareExtensionLogger.info("📦 [迁移] 目标文件是否已存在: \(fileExists)")
+            
+            if fileExists {
+                shareExtensionLogger.error("❌ [迁移] 目标文件已存在，拒绝覆盖: \(newFileName)")
+                return false
             }
+            
+            shareExtensionLogger.info("📦 [迁移] 开始文件协调和移动操作")
             
             let coordinator = NSFileCoordinator()
             var error: NSError?
