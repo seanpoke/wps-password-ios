@@ -760,6 +760,14 @@ struct ShareExtensionView: View {
                         
                         shareExtensionLogger.info("📄 [EXT] 加载到 URL: \(url.path, privacy: .public)")
                         
+                        let fileExtension = url.pathExtension.lowercased()
+                        if !["docx", "pptx", "xlsx"].contains(fileExtension) {
+                            shareExtensionLogger.warning("⚠️ [EXT] 文件类型不支持: \(fileExtension)")
+                            completeExtension(withError: "仅支持 docx、pptx、xlsx 类型文件")
+                            return
+                        }
+                        shareExtensionLogger.info("✅ [EXT] 文件类型支持: \(fileExtension)")
+        
                         originalSourceURL = url
                         
                         let tempURL = try copyToTempInbox(sourceURL: url)
