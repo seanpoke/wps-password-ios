@@ -79,6 +79,8 @@ struct ContentView: View {
     
     private var searchIndex: SearchIndex = SearchIndex()
     @StateObject private var docInteractionManager = DocumentInteractionManager()
+    @ObservedObject private var diskSpaceManager = DiskSpaceManager.shared
+    @State private var showDiskSpaceWarning = false
     
     var body: some View {
         NavigationStack {
@@ -169,6 +171,11 @@ struct ContentView: View {
                     Text("确定要删除 \"\(record.file_name)\" 吗？此操作不可撤销。")
                 }
             })
+            .onChange(of: diskSpaceManager.shouldShowWarning) { newValue in
+                if newValue {
+                    showDiskSpaceAlert()
+                }
+            }
             .overlay(
                 Group {
                     if isRefreshing {
@@ -211,6 +218,9 @@ struct ContentView: View {
     
     private func refreshList() {
         loadRecords()
+        Task {
+            await diskSpaceManager.checkDiskSpace()
+        }
     }
     
     private func requestDelete(at offsets: IndexSet) {
@@ -351,6 +361,34 @@ struct ContentView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             toastVisible = false
         }
+    }
+    
+    private func showDiskSpaceAlert() {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first,
+              var topVC = window.rootViewController else {
+            return
+        }
+        
+        while let presented = topVC.presentedViewController {
+            topVC = presented
+        }
+        
+        let alert = UIAlertController(
+            title: "磁盘空间警告",
+            message: "当前保险箱占用空间已超过1GB，建议您手动删除不再需要的文件以释放磁盘空间。",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "不再提示", style: .default) { _ in
+            self.diskSpaceManager.dismissWarning(permanently: true)
+        })
+        
+        alert.addAction(UIAlertAction(title: "确定", style: .default) { _ in
+            self.diskSpaceManager.dismissWarning()
+        })
+        
+        topVC.present(alert, animated: true)
     }
 }
 

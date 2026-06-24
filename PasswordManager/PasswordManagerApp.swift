@@ -37,6 +37,7 @@ struct PasswordManagerApp: App {
     private func performBackgroundCleanup() async {
         await cleanupExpiredTempFiles()
         await cleanupZombieIndexes()
+        await cleanupExpiredNonLocalVaultRecords()
         await cleanupLRUDiskSpace()
     }
     
@@ -143,77 +144,36 @@ struct PasswordManagerApp: App {
         }
     }
     
+    private func cleanupExpiredNonLocalVaultRecords() async {
+        let expirationInterval: TimeInterval = 24 * 60 * 60
+        
+        let nonLocalRecords = AppGroupDBManager.shared.queryNonLocalVaultRecords()
+        appLogger.info("🔍 开始未落盘记录清理，数据库中有 \(nonLocalRecords.count) 条未落盘记录")
+        
+        let now = Date().timeIntervalSince1970
+        var cleanedCount = 0
+        
+        for record in nonLocalRecords {
+            let age = now - TimeInterval(record.last_access_time)
+            
+            if age > expirationInterval {
+                let success = AppGroupDBManager.shared.deleteRecord(uid: record.uid)
+                if success {
+                    cleanedCount += 1
+                    appLogger.info("🗑️ 清理过期未落盘记录: \(record.file_name) | UID: \(record.uid)")
+                }
+            }
+        }
+        
+        if cleanedCount > 0 {
+            appLogger.info("✅ 未落盘记录清理完成，共移除 \(cleanedCount) 条过期记录")
+        } else {
+            appLogger.debug("📋 没有过期的未落盘记录需要清理")
+        }
+    }
+    
     private func cleanupLRUDiskSpace() async {
-        let appGroupID = "group.com.greenet.PasswordManager"
-        let safeVaultDir = "SafeVault"
-        let maxDiskUsage: Int64 = 1 * 1024 * 1024 * 1024
-        
-        guard let containerURL = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: appGroupID
-        ) else {
-            appLogger.error("❌ 无法获取 App Group 容器")
-            return
-        }
-        
-        let vaultDir = containerURL.appendingPathComponent(safeVaultDir, isDirectory: true)
-        
-        do {
-            if !FileManager.default.fileExists(atPath: vaultDir.path) {
-                appLogger.debug("📂 保险箱目录不存在")
-                return
-            }
-            
-            let attributes = try FileManager.default.attributesOfItem(atPath: vaultDir.path)
-            guard let totalSize = attributes[.size] as? Int64 else {
-                appLogger.debug("📊 无法获取目录大小")
-                return
-            }
-            
-            appLogger.info("📊 保险箱当前占用: \(formatFileSize(totalSize)) | 阈值: \(formatFileSize(maxDiskUsage))")
-            
-            if totalSize <= maxDiskUsage {
-                appLogger.debug("📋 磁盘空间在安全范围内")
-                return
-            }
-            
-            let excessSize = totalSize - maxDiskUsage
-            appLogger.warning("⚠️ 磁盘空间超额: \(formatFileSize(excessSize))，需要清理")
-            
-            let localRecords = AppGroupDBManager.shared.queryAllLocalVaultRecords()
-            
-            var freedSize: Int64 = 0
-            var cleanedCount = 0
-            
-            for record in localRecords {
-                guard freedSize < excessSize else {
-                    break
-                }
-                
-                let fileURL = vaultDir.appendingPathComponent(record.file_name)
-                
-                if FileManager.default.fileExists(atPath: fileURL.path) {
-                    do {
-                        let fileAttributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
-                        let fileSize = fileAttributes[.size] as? Int64 ?? 0
-                        
-                        try FileManager.default.removeItem(at: fileURL)
-                        AppGroupDBManager.shared.deleteRecord(uid: record.uid)
-                        
-                        freedSize += fileSize
-                        cleanedCount += 1
-                        
-                        appLogger.info("🗑️ LRU清理: \(record.file_name) | 大小: \(formatFileSize(fileSize))")
-                    } catch {
-                        appLogger.error("❌ LRU清理失败: \(record.file_name) | \(error)")
-                    }
-                }
-            }
-            
-            appLogger.info("✅ LRU清理完成，共移除 \(cleanedCount) 个文件，释放 \(formatFileSize(freedSize))")
-            
-        } catch {
-            appLogger.error("❌ LRU磁盘清理失败: \(error)")
-        }
+        await DiskSpaceManager.shared.checkDiskSpace()
     }
     
     private func formatFileSize(_ bytes: Int64) -> String {
