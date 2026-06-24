@@ -90,7 +90,7 @@ final class AppGroupDBManager {
     }
 
     private func normalizeFileName(_ fileName: String) -> String {
-        return fileName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return fileName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func saveFileMapping(fileName: String, uid: String, passwordHash: String, fileSize: Int64, isLocalVault: Int) -> Bool {

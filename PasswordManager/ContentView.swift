@@ -243,7 +243,22 @@ struct ContentView: View {
         }
         
         let vaultDir = containerURL.appendingPathComponent(safeVaultDir, isDirectory: true)
-        let fileURL = vaultDir.appendingPathComponent(record.file_name)
+        let dbFileName = record.file_name
+        var fileURL = vaultDir.appendingPathComponent(dbFileName)
+        
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            do {
+                let files = try FileManager.default.contentsOfDirectory(at: vaultDir, includingPropertiesForKeys: nil)
+                for candidateURL in files {
+                    if candidateURL.lastPathComponent.lowercased() == dbFileName.lowercased() {
+                        fileURL = candidateURL
+                        break
+                    }
+                }
+            } catch {
+                appLogger.error("❌ 遍历保险箱目录失败: \(error)")
+            }
+        }
         
         do {
             if FileManager.default.fileExists(atPath: fileURL.path) {
@@ -275,7 +290,25 @@ struct ContentView: View {
         }
         
         let vaultDir = containerURL.appendingPathComponent(safeVaultDir, isDirectory: true)
-        let fileURL = vaultDir.appendingPathComponent(record.file_name)
+        let dbFileName = record.file_name
+        var fileURL = vaultDir.appendingPathComponent(dbFileName)
+        
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            appLogger.warning("⚠️ 文件名 \(dbFileName) 不存在，尝试大小写不敏感匹配")
+            
+            do {
+                let files = try FileManager.default.contentsOfDirectory(at: vaultDir, includingPropertiesForKeys: nil)
+                for candidateURL in files {
+                    if candidateURL.lastPathComponent.lowercased() == dbFileName.lowercased() {
+                        fileURL = candidateURL
+                        appLogger.info("✅ 找到匹配文件: \(fileURL.lastPathComponent)")
+                        break
+                    }
+                }
+            } catch {
+                appLogger.error("❌ 遍历保险箱目录失败: \(error)")
+            }
+        }
         
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             appLogger.error("❌ 文件不存在: \(fileURL.path)")

@@ -61,6 +61,7 @@ struct ShareExtensionView: View {
     @State private var fileSize: Int64 = 0
     @State private var isBruteForcing: Bool = false
     @State private var hasPasswordInMetadata: Bool = false
+    @State private var isEncryptedFile: Bool = true
     
     @State private var assetList: [FileMappingRecord] = []
     @State private var showAssetList: Bool = false
@@ -218,7 +219,7 @@ struct ShareExtensionView: View {
         VStack(spacing: 40) {
             Spacer()
             
-            Image(systemName: "key.fill")
+            Image(systemName: isEncryptedFile ? "key.fill" : "file")
                 .font(.system(size: 80))
                 .foregroundColor(.white)
                 .shadow(radius: 10)
@@ -229,7 +230,7 @@ struct ShareExtensionView: View {
                     .fontWeight(.bold)
                     .foregroundColor(.white)
                 
-                Text("检测到加密文件: \(detectedFileName)")
+                Text(isEncryptedFile ? "检测到加密文件: \(detectedFileName)" : "检测到文件: \(detectedFileName)")
                     .font(.headline)
                     .foregroundColor(.white.opacity(0.9))
                     .padding(.horizontal, 20)
@@ -238,19 +239,21 @@ struct ShareExtensionView: View {
                     .cornerRadius(12)
             }
             
-            VStack(spacing: 16) {
-                SecureField("请输入文件密码", text: $capturedPassword)
-                    .font(.title)
-                    .foregroundColor(.white)
-                    .padding()
-                    .background(Color.black.opacity(0.3))
-                    .cornerRadius(12)
-                    .padding(.horizontal, 20)
-                
-                if let error = verificationError {
-                    Text(error)
-                        .font(.subheadline)
-                        .foregroundColor(.red)
+            if isEncryptedFile {
+                VStack(spacing: 16) {
+                    SecureField("请输入文件密码", text: $capturedPassword)
+                        .font(.title)
+                        .foregroundColor(.white)
+                        .padding()
+                        .background(Color.black.opacity(0.3))
+                        .cornerRadius(12)
+                        .padding(.horizontal, 20)
+                    
+                    if let error = verificationError {
+                        Text(error)
+                            .font(.subheadline)
+                            .foregroundColor(.red)
+                    }
                 }
             }
             
@@ -260,27 +263,29 @@ struct ShareExtensionView: View {
                     .scaleEffect(2)
             } else {
                 VStack(spacing: 16) {
-                    Button(action: verifyAndRegisterAsNew) {
+                    Button(action: isEncryptedFile ? verifyAndRegisterAsNew : registerNewFileWithoutPassword) {
                         Text("文件另存为")
-                            .font(.headline)
-                            .foregroundColor(.orange)
-                            .padding()
-                            .frame(maxWidth: 280)
-                            .background(Color.white)
-                            .cornerRadius(16)
-                            .shadow(radius: 8)
-                    }
-                    
-                    Button(action: verifyAndShowAssetSelection) {
-                        Text("覆盖其他文件")
                             .font(.headline)
                             .foregroundColor(.white)
                             .padding()
-                            .frame(maxWidth: 280)
+                            .frame(maxWidth: .infinity)
                             .background(Color.white.opacity(0.2))
                             .cornerRadius(16)
                             .shadow(radius: 8)
                     }
+                    .padding(.horizontal, 20)
+                    
+                    Button(action: isEncryptedFile ? verifyAndShowAssetSelection : showAssetSelection) {
+                        Text("覆盖其他文件")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .padding()
+                            .frame(maxWidth: .infinity)
+                            .background(Color.white.opacity(0.15))
+                            .cornerRadius(16)
+                            .shadow(radius: 8)
+                    }
+                    .padding(.horizontal, 20)
                 }
             }
             
@@ -370,18 +375,18 @@ struct ShareExtensionView: View {
         VStack(spacing: 40) {
             Spacer()
             
-            Image(systemName: "lock.fill")
+            Image(systemName: isEncryptedFile ? "lock.fill" : "file")
                 .font(.system(size: 80))
                 .foregroundColor(.white)
                 .shadow(radius: 10)
             
             VStack(spacing: 16) {
-                Text(matchedUID.isEmpty ? "密码撞击失败" : "需要验证身份")
+                Text(matchedUID.isEmpty ? (isEncryptedFile ? "密码撞击失败" : "识别到新文件") : "需要验证身份")
                     .font(.title)
                     .fontWeight(.bold)
                     .foregroundColor(.white)
                 
-                Text(matchedUID.isEmpty ? "检测到: \(detectedFileName)" : "检测到身份标识: \(detectedFileName)")
+                Text(isEncryptedFile ? (matchedUID.isEmpty ? "检测到: \(detectedFileName)" : "检测到身份标识: \(detectedFileName)") : "检测到文件: \(detectedFileName)")
                     .font(.headline)
                     .foregroundColor(.white.opacity(0.9))
                     .padding(.horizontal, 20)
@@ -396,19 +401,21 @@ struct ShareExtensionView: View {
                 }
             }
             
-            VStack(spacing: 16) {
-                SecureField(matchedUID.isEmpty ? "请输入最新密码" : "请输入文件密码", text: $capturedPassword)
-                    .font(.title)
-                    .foregroundColor(.white)
-                    .padding()
-                    .background(Color.black.opacity(0.3))
-                    .cornerRadius(12)
-                    .padding(.horizontal, 20)
-                
-                if let error = verificationError {
-                    Text(error)
-                        .font(.subheadline)
-                        .foregroundColor(.red)
+            if isEncryptedFile {
+                VStack(spacing: 16) {
+                    SecureField(matchedUID.isEmpty ? "请输入最新密码" : "请输入文件密码", text: $capturedPassword)
+                        .font(.title)
+                        .foregroundColor(.white)
+                        .padding()
+                        .background(Color.black.opacity(0.3))
+                        .cornerRadius(12)
+                        .padding(.horizontal, 20)
+                    
+                    if let error = verificationError {
+                        Text(error)
+                            .font(.subheadline)
+                            .foregroundColor(.red)
+                    }
                 }
             }
             
@@ -418,7 +425,7 @@ struct ShareExtensionView: View {
                     .scaleEffect(2)
             } else {
                 VStack(spacing: 16) {
-                    Button(action: verifyPasswordAndSaveAsNewFromBlueB) {
+                    Button(action: isEncryptedFile ? verifyPasswordAndSaveAsNewFromBlueB : saveAsNewAction) {
                         Text("文件另存为")
                             .font(.headline)
                             .foregroundColor(.white)
@@ -430,7 +437,7 @@ struct ShareExtensionView: View {
                     }
                     .padding(.horizontal, 20)
                     
-                    Button(action: verifyAndShowAssetSelection) {
+                    Button(action: isEncryptedFile ? verifyAndShowAssetSelection : showAssetSelection) {
                         Text("覆盖其他文件")
                             .font(.headline)
                             .foregroundColor(.white)
@@ -670,30 +677,36 @@ struct ShareExtensionView: View {
             return
         }
         
-        if capturedPassword.isEmpty {
-            verificationError = "请输入密码"
-            return
-        }
-        
-        isVerifying = true
-        
-        OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: tempURL, password: capturedPassword) { result in
-            Task { @MainActor in
-                self.isVerifying = false
-                
-                switch result {
-                case .success(let verified):
-                    if verified {
-                        self.showPasswordInputDialog = false
-                        self.verificationError = nil
-                        self.executePendingAction()
-                    } else {
-                        self.verificationError = "密码验证失败，请重试"
+        if isEncryptedFile {
+            if capturedPassword.isEmpty {
+                verificationError = "请输入密码"
+                return
+            }
+            
+            isVerifying = true
+            
+            OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: tempURL, password: capturedPassword) { result in
+                Task { @MainActor in
+                    self.isVerifying = false
+                    
+                    switch result {
+                    case .success(let verified):
+                        if verified {
+                            self.showPasswordInputDialog = false
+                            self.verificationError = nil
+                            self.executePendingAction()
+                        } else {
+                            self.verificationError = "密码验证失败，请重试"
+                        }
+                    case .failure(let error):
+                        self.verificationError = error.localizedDescription
                     }
-                case .failure(let error):
-                    self.verificationError = error.localizedDescription
                 }
             }
+        } else {
+            showPasswordInputDialog = false
+            verificationError = nil
+            executePendingAction()
         }
     }
     
@@ -766,6 +779,10 @@ struct ShareExtensionView: View {
                         await determineHostType()
                         let hostTypeName = hostType == .wps ? "WPS" : hostType == .external ? "外部" : "未知"
                         shareExtensionLogger.info("🏠 [EXT] 判定宿主类型: \(hostTypeName, privacy: .public)")
+                        
+                        isEncryptedFile = OfficeCryptoVerifier.shared.isFileEncrypted(fileURL: tempURL)
+                        shareExtensionLogger.info("🔐 [EXT] 文件加密状态: \(isEncryptedFile ? "已加密" : "未加密")")
+                        
                         await determineActionState(tempURL: tempURL, fileName: correctedName)
                         
                     } catch {
@@ -1061,6 +1078,25 @@ struct ShareExtensionView: View {
         completeExtension()
     }
     
+    private func registerNewFileWithoutPassword() {
+        shareExtensionLogger.info("📝 [普通文件] registerNewFileWithoutPassword 被调用")
+        
+        guard let tempURL = tempFilePath else {
+            shareExtensionLogger.error("❌ [普通文件] 文件路径无效")
+            completeExtension(withError: "文件路径无效")
+            return
+        }
+        
+        let fileName = detectedFileName
+        let baseName = URL(fileURLWithPath: fileName).deletingPathExtension().lastPathComponent
+        let ext = URL(fileURLWithPath: fileName).pathExtension.isEmpty ? "" : ".\(URL(fileURLWithPath: fileName).pathExtension)"
+        
+        newFileNameInput = baseName
+        fileExtension = ext
+        isSaveAsNewMode = true
+        showRenameDialog = true
+    }
+    
     private func verifyAndRegisterAsNew() {
         shareExtensionLogger.info("🔑 [识别到新文件] verifyAndRegisterAsNew 被调用")
         shareExtensionLogger.info("🔑 [识别到新文件] 输入密码长度: \(capturedPassword.count)")
@@ -1169,16 +1205,10 @@ struct ShareExtensionView: View {
         let baseName = URL(fileURLWithPath: fileName).deletingPathExtension().lastPathComponent
         let ext = URL(fileURLWithPath: fileName).pathExtension.isEmpty ? "" : ".\(URL(fileURLWithPath: fileName).pathExtension)"
         
-        if fileNameExistsInVault(fileName: fileName) {
-            shareExtensionLogger.warning("⚠️ [识别到新文件] 发现重名文件: \(fileName)")
-            newFileNameInput = baseName
-            fileExtension = ext
-            isSaveAsNewMode = false
-            showRenameDialog = true
-            return
-        }
-        
-        performRegisterNewFile(password: password, fileName: fileName)
+        newFileNameInput = baseName
+        fileExtension = ext
+        isSaveAsNewMode = false
+        showRenameDialog = true
     }
     
     private func fileNameExistsInVault(fileName: String) -> Bool {
@@ -1213,24 +1243,21 @@ struct ShareExtensionView: View {
             }
         }
         
-        let destURL = vaultDir.appendingPathComponent(fileName)
-        shareExtensionLogger.info("🔍 [保险箱检查] 目标文件完整路径: \(destURL.path)")
-        
-        let exists = FileManager.default.fileExists(atPath: destURL.path)
-        shareExtensionLogger.info("🔍 [保险箱检查] 文件存在检查结果: \(exists)")
-        
-        // 列出保险箱目录中的所有文件，帮助排查
+        // 大小写不敏感检查
         do {
             let files = try FileManager.default.contentsOfDirectory(atPath: vaultDir.path)
-            shareExtensionLogger.info("🔍 [保险箱检查] 保险箱中现有文件列表: \(files.count)个文件")
             for file in files {
-                shareExtensionLogger.info("🔍 [保险箱检查]   - \(file)")
+                if file.lowercased() == fileName.lowercased() {
+                    shareExtensionLogger.info("🔍 [保险箱检查] 找到匹配文件（大小写不敏感）: \(file)")
+                    return true
+                }
             }
+            shareExtensionLogger.info("🔍 [保险箱检查] 文件存在检查结果: false")
+            return false
         } catch {
             shareExtensionLogger.warning("⚠️ [保险箱检查] 无法列出保险箱目录内容: \(error)")
+            return false
         }
-        
-        return exists
     }
     
     private func performRegisterNewFile(password: String, fileName: String) {
@@ -1317,10 +1344,10 @@ struct ShareExtensionView: View {
         
         if isSaveAsNewMode {
             shareExtensionLogger.info("✅ [确认重命名] 调用 performSaveAsNew")
-            performSaveAsNew(newFileName: fullFileName)
+            performSaveAsNew(newFileName: fullFileName, password: isEncryptedFile ? capturedPassword : "")
         } else {
             shareExtensionLogger.info("✅ [确认重命名] 调用 performRegisterNewFile")
-            performRegisterNewFile(password: capturedPassword, fileName: fullFileName)
+            performRegisterNewFile(password: isEncryptedFile ? capturedPassword : "", fileName: fullFileName)
         }
     }
     
@@ -1386,31 +1413,35 @@ struct ShareExtensionView: View {
         
         shareExtensionLogger.info("🔄 [同步覆盖] 目标: \(fileName) | UID: \(uid)")
         
-        if capturedPassword.isEmpty {
-            showPasswordInputDialog = true
-            pendingAction = .syncOverride
-            return
-        }
-        
-        isVerifying = true
-        
-        OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: tempURL, password: capturedPassword) { result in
-            Task { @MainActor in
-                self.isVerifying = false
-                
-                switch result {
-                case .success(let verified):
-                    if verified {
-                        self.performSyncOverride(fileName: fileName, uid: uid, password: self.capturedPassword)
-                    } else {
+        if isEncryptedFile {
+            if capturedPassword.isEmpty {
+                showPasswordInputDialog = true
+                pendingAction = .syncOverride
+                return
+            }
+            
+            isVerifying = true
+            
+            OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: tempURL, password: capturedPassword) { result in
+                Task { @MainActor in
+                    self.isVerifying = false
+                    
+                    switch result {
+                    case .success(let verified):
+                        if verified {
+                            self.performSyncOverride(fileName: fileName, uid: uid, password: self.capturedPassword)
+                        } else {
+                            self.showPasswordInputDialog = true
+                            self.pendingAction = .syncOverride
+                        }
+                    case .failure(let error):
                         self.showPasswordInputDialog = true
                         self.pendingAction = .syncOverride
                     }
-                case .failure(let error):
-                    self.showPasswordInputDialog = true
-                    self.pendingAction = .syncOverride
                 }
             }
+        } else {
+            performSyncOverride(fileName: fileName, uid: uid, password: "")
         }
     }
     
@@ -1522,38 +1553,44 @@ struct ShareExtensionView: View {
             return
         }
         
-        if capturedPassword.isEmpty {
-            showPasswordInputDialog = true
-            pendingAction = .saveAsNew(newFileName: trimmedName)
-            return
-        }
-        
-        guard let tempURL = tempFilePath else {
-            completeExtension(withError: "文件路径无效")
-            return
-        }
-        
-        isVerifying = true
-        
-        OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: tempURL, password: capturedPassword) { result in
-            Task { @MainActor in
-                self.isVerifying = false
-                
-                switch result {
-                case .success(let verified):
-                    if verified {
-                        self.showRenameDialog = false
-                        self.verificationError = nil
-                        self.performSaveAsNew(newFileName: trimmedName, password: self.capturedPassword)
-                    } else {
+        if isEncryptedFile {
+            if capturedPassword.isEmpty {
+                showPasswordInputDialog = true
+                pendingAction = .saveAsNew(newFileName: trimmedName)
+                return
+            }
+            
+            guard let tempURL = tempFilePath else {
+                completeExtension(withError: "文件路径无效")
+                return
+            }
+            
+            isVerifying = true
+            
+            OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: tempURL, password: capturedPassword) { result in
+                Task { @MainActor in
+                    self.isVerifying = false
+                    
+                    switch result {
+                    case .success(let verified):
+                        if verified {
+                            self.showRenameDialog = false
+                            self.verificationError = nil
+                            self.performSaveAsNew(newFileName: trimmedName, password: self.capturedPassword)
+                        } else {
+                            self.showPasswordInputDialog = true
+                            self.pendingAction = .saveAsNew(newFileName: trimmedName)
+                        }
+                    case .failure(let error):
                         self.showPasswordInputDialog = true
                         self.pendingAction = .saveAsNew(newFileName: trimmedName)
                     }
-                case .failure(let error):
-                    self.showPasswordInputDialog = true
-                    self.pendingAction = .saveAsNew(newFileName: trimmedName)
                 }
             }
+        } else {
+            showRenameDialog = false
+            verificationError = nil
+            performSaveAsNew(newFileName: trimmedName, password: "")
         }
     }
     
@@ -1665,55 +1702,86 @@ struct ShareExtensionView: View {
         }
         
         let fileName = record.file_name
-        let password = capturedPassword
+        let password = isEncryptedFile ? capturedPassword : ""
         
         let targetUid = readUidFromVaultFile(fileName: fileName) ?? record.uid
         
         shareExtensionLogger.info("🎯 [状态D] 选择资产: \(fileName) | UID(数据库): \(record.uid) | UID(文件尾部): \(targetUid)")
+        shareExtensionLogger.info("🎯 [状态D] 文件加密状态: \(isEncryptedFile ? "已加密" : "未加密")")
         
-        isVerifying = true
-        
-        OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: tempURL, password: password) { result in
-            Task { @MainActor in
-                self.isVerifying = false
-                
-                switch result {
-                case .success(let verified):
-                    if verified {
-                        Task.detached {
-                            let success = writeWppmMarkers(tempURL: tempURL, uid: targetUid, password: password)
-                            
-                            if success {
-                                let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
+        if isEncryptedFile {
+            isVerifying = true
+            
+            OfficeCryptoVerifier.shared.verifyPasswordAsync(fileURL: tempURL, password: password) { result in
+                Task { @MainActor in
+                    self.isVerifying = false
+                    
+                    switch result {
+                    case .success(let verified):
+                        if verified {
+                            Task.detached {
+                                let success = writeWppmMarkers(tempURL: tempURL, uid: targetUid, password: password)
                                 
-                                await MainActor.run {
-                                    if moveSuccess {
-                                        _ = AppGroupDBManager.shared.saveFileMapping(
-                                            fileName: fileName,
-                                            uid: targetUid,
-                                            passwordHash: password,
-                                            fileSize: self.fileSize,
-                                            isLocalVault: 1
-                                        )
-                                        shareExtensionLogger.info("✅ [状态D] 覆盖成功")
-                                        self.completeExtension()
-                                    } else {
-                                        self.completeExtension(withError: "文件迁移失败")
+                                if success {
+                                    let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
+                                    
+                                    await MainActor.run {
+                                        if moveSuccess {
+                                            _ = AppGroupDBManager.shared.saveFileMapping(
+                                                fileName: fileName,
+                                                uid: targetUid,
+                                                passwordHash: password,
+                                                fileSize: self.fileSize,
+                                                isLocalVault: 1
+                                            )
+                                            shareExtensionLogger.info("✅ [状态D] 覆盖成功")
+                                            self.completeExtension()
+                                        } else {
+                                            self.completeExtension(withError: "文件迁移失败")
+                                        }
+                                    }
+                                } else {
+                                    await MainActor.run {
+                                        self.completeExtension(withError: "写入标记失败")
                                     }
                                 }
-                            } else {
-                                await MainActor.run {
-                                    self.completeExtension(withError: "写入标记失败")
-                                }
                             }
+                        } else {
+                            self.showPasswordInputDialog = true
+                            self.pendingAction = .associateOverride
                         }
-                    } else {
+                    case .failure(let error):
                         self.showPasswordInputDialog = true
                         self.pendingAction = .associateOverride
                     }
-                case .failure(let error):
-                    self.showPasswordInputDialog = true
-                    self.pendingAction = .associateOverride
+                }
+            }
+        } else {
+            Task.detached {
+                let success = writeWppmMarkers(tempURL: tempURL, uid: targetUid, password: password)
+                
+                if success {
+                    let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
+                    
+                    await MainActor.run {
+                        if moveSuccess {
+                            _ = AppGroupDBManager.shared.saveFileMapping(
+                                fileName: fileName,
+                                uid: targetUid,
+                                passwordHash: password,
+                                fileSize: self.fileSize,
+                                isLocalVault: 1
+                            )
+                            shareExtensionLogger.info("✅ [状态D] 覆盖成功")
+                            self.completeExtension()
+                        } else {
+                            self.completeExtension(withError: "文件迁移失败")
+                        }
+                    }
+                } else {
+                    await MainActor.run {
+                        self.completeExtension(withError: "写入标记失败")
+                    }
                 }
             }
         }

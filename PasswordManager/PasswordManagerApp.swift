@@ -38,7 +38,7 @@ struct PasswordManagerApp: App {
         await cleanupExpiredTempFiles()
         await cleanupZombieIndexes()
         await cleanupExpiredNonLocalVaultRecords()
-        await cleanupLRUDiskSpace()
+        await checkVaultDiskSpace()
     }
     
     private func cleanupExpiredTempFiles() async {
@@ -172,7 +172,7 @@ struct PasswordManagerApp: App {
         }
     }
     
-    private func cleanupLRUDiskSpace() async {
+    private func checkVaultDiskSpace() async {
         await DiskSpaceManager.shared.checkDiskSpace()
     }
     

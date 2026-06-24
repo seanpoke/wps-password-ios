@@ -50,6 +50,45 @@ final class OfficeCryptoVerifier {
     
     private init() {}
     
+    func isFileEncrypted(fileURL: URL) -> Bool {
+        cryptoLogger.info("🔍 [加密检测] 开始检测文件是否加密")
+        
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            cryptoLogger.warning("⚠️ [加密检测] 文件不存在")
+            return false
+        }
+        
+        do {
+            let fileData = try Data(contentsOf: fileURL, options: .uncached)
+            cryptoLogger.debug("🔍 [加密检测] 文件大小: \(fileData.count) 字节")
+            
+            if isOLE2Format(data: fileData) {
+                cryptoLogger.info("🔍 [加密检测] 识别为 OLE2 复合文档")
+                
+                if let ole2Parser = OLE2Parser(data: fileData) {
+                    if ole2Parser.readStream(name: "EncryptionInfo") != nil {
+                        cryptoLogger.info("✅ [加密检测] OLE2文件存在 EncryptionInfo 流，判定为加密文件")
+                        return true
+                    }
+                }
+                cryptoLogger.info("❌ [加密检测] OLE2文件未找到 EncryptionInfo 流，判定为未加密")
+                return false
+            }
+            
+            if let _ = fileData.range(of: "EncryptedPackage".data(using: .utf8)!) {
+                cryptoLogger.info("✅ [加密检测] OOXML文件存在 EncryptedPackage 标记，判定为加密文件")
+                return true
+            }
+            
+            cryptoLogger.info("❌ [加密检测] 文件未找到加密标记，判定为未加密")
+            return false
+            
+        } catch {
+            cryptoLogger.error("❌ [加密检测] 文件读取失败: \(error)")
+            return false
+        }
+    }
+    
     func verifyPasswordAsync(fileURL: URL, password: String, timeout: TimeInterval? = nil, completion: @escaping (Result<Bool, CryptoError>) -> Void) {
         cryptoLogger.info("🔐 [密码验证] 收到验证请求，密码: \(password)，长度: \(password.count)")
         let fileManager = FileManager.default
