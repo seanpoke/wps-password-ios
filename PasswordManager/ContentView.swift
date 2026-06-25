@@ -64,6 +64,8 @@ class DocumentInteractionManager: ObservableObject {
 }
 
 struct ContentView: View {
+    var onLogout: () -> Void
+    
     @State private var records: [FileMappingRecord] = []
     @State private var filteredRecords: [FileMappingRecord] = []
     @State private var searchText = ""
@@ -76,8 +78,10 @@ struct ContentView: View {
     @State private var showDebugView = false
     @State private var searchBarTapCount = 0
     @State private var lastTapTime = Date()
+    @State private var showLogoutSheet = false
+    @State private var userName = ""
     
-    private var searchIndex: SearchIndex = SearchIndex()
+    @State private var searchIndex = SearchIndex()
     @StateObject private var docInteractionManager = DocumentInteractionManager()
     @ObservedObject private var diskSpaceManager = DiskSpaceManager.shared
     @State private var showDiskSpaceWarning = false
@@ -85,6 +89,34 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text("\(userName)，你好")
+                            .font(.title)
+                            .fontWeight(.bold)
+                    }
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        showLogoutSheet = true
+                    }) {
+                        ZStack {
+                            Circle()
+                                .fill(Color(red: 0.6, green: 0.8, blue: 1.0))
+                                .frame(width: 44, height: 44)
+                            
+                            Text(userName.first?.description ?? "")
+                                .font(.title)
+                                .fontWeight(.bold)
+                                .foregroundColor(.white)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                
                 SearchBar(text: $searchText)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
@@ -149,6 +181,7 @@ struct ContentView: View {
             }
             .onAppear {
                 loadRecords()
+                loadUserName()
             }
             .onChange(of: searchText) {
                 filterRecords()
@@ -191,6 +224,46 @@ struct ContentView: View {
                     }
                 }
             )
+            .sheet(isPresented: $showLogoutSheet) {
+                VStack(spacing: 12) {
+                    Text("是否确认注销？")
+                        .font(.title)
+                        .fontWeight(.bold)
+                    
+                    Text("注销后将返回登录页面，需要重新登录")
+                        .font(.body)
+                        .foregroundColor(.gray)
+                    
+                    HStack(spacing: 16) {
+                        Button(action: {
+                            showLogoutSheet = false
+                        }) {
+                            Text("取消")
+                                .font(.headline)
+                                .foregroundColor(.black)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color(.systemGray5))
+                                .cornerRadius(12)
+                        }
+                        
+                        Button(action: {
+                            showLogoutSheet = false
+                            onLogout()
+                        }) {
+                            Text("注销")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.red)
+                                .cornerRadius(12)
+                        }
+                    }
+                }
+                .padding()
+                .presentationDetents([.height(200)])
+            }
         }
     }
     
@@ -204,6 +277,15 @@ struct ContentView: View {
                 records = sortedRecords
                 filterRecords()
                 isRefreshing = false
+            }
+        }
+    }
+    
+    private func loadUserName() {
+        DispatchQueue.global().async {
+            let name = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.name) ?? ""
+            DispatchQueue.main.async {
+                self.userName = name
             }
         }
     }
@@ -855,20 +937,53 @@ class DocumentInteractionDelegate: NSObject, UIDocumentInteractionControllerDele
 
 struct DebugDatabaseView: View {
     @State private var dbLog = ""
-    
+    @State private var selectedTable = "file_mapping"
+    @State private var configRecords: [GlobalConfigRecord] = []
+
+    private let tableOptions = [
+        ("file_mapping", "文件映射表"),
+        ("global_config", "全局配置表")
+    ]
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                ScrollView {
-                    Text(dbLog)
-                        .font(.system(size: 11))
+                HStack(spacing: 12) {
+                    Text("选择表:")
+                        .font(.caption)
                         .foregroundColor(.gray)
-                        .padding(16)
-                        .textSelection(.enabled)
+
+                    Picker("", selection: $selectedTable) {
+                        ForEach(tableOptions, id: \.0) { option in
+                            Text(option.1)
+                                .tag(option.0)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .onChange(of: selectedTable) {
+                        refreshDBLog()
+                    }
+
+                    Spacer()
                 }
-                
+                .padding()
+
                 Divider()
-                
+
+                if selectedTable == "global_config" {
+                    configTableView
+                } else {
+                    ScrollView {
+                        Text(dbLog)
+                            .font(.system(size: 11))
+                            .foregroundColor(.gray)
+                            .padding(16)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                Divider()
+
                 HStack(spacing: 12) {
                     Button(action: refreshDBLog) {
                         Text("刷新")
@@ -879,15 +994,17 @@ struct DebugDatabaseView: View {
                             .background(Color.blue)
                             .cornerRadius(12)
                     }
-                    
-                    Button(action: clearDB) {
-                        Text("清空")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .padding()
-                            .frame(maxWidth: .infinity)
-                            .background(Color.red)
-                            .cornerRadius(12)
+
+                    if selectedTable == "file_mapping" {
+                        Button(action: clearDB) {
+                            Text("清理未落盘记录")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color.red)
+                                .cornerRadius(12)
+                        }
                     }
                 }
                 .padding(16)
@@ -898,21 +1015,112 @@ struct DebugDatabaseView: View {
             }
         }
     }
-    
-    private func refreshDBLog() {
-        dbLog = AppGroupDBManager.shared.fetchAllLog()
-    }
-    
-    private func clearDB() {
-        let records = AppGroupDBManager.shared.queryNonLocalVaultRecords()
-        let ids = records.map { $0.id }
-        if ids.isEmpty {
-            appLogger.info("🔍 [调试页面] 没有未落盘数据可清空")
-        } else {
-            _ = AppGroupDBManager.shared.deleteRecord(ids: ids)
-            appLogger.info("🔍 [调试页面] 已清空 \(ids.count) 条未落盘数据")
+
+    private var configTableView: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text("Key")
+                    .font(.system(size: 13, weight: .bold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("Value")
+                    .font(.system(size: 13, weight: .bold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("Remark")
+                    .font(.system(size: 13, weight: .bold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color(.systemGray5))
+
+            Divider()
+
+            if configRecords.isEmpty {
+                Spacer()
+                Text("全局配置表当前为空")
+                    .font(.system(size: 13))
+                    .foregroundColor(.gray)
+                Spacer()
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(configRecords.enumerated()), id: \.element.id) { index, record in
+                            HStack(spacing: 8) {
+                                Text(record.key)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.primary)
+                                    .textSelection(.enabled)
+                                    .lineLimit(2)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                Text(displayValue(for: record))
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundColor(.primary)
+                                    .textSelection(.enabled)
+                                    .lineLimit(3)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                Text(record.remark.isEmpty ? "-" : record.remark)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.gray)
+                                    .textSelection(.enabled)
+                                    .lineLimit(2)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(index.isMultiple(of: 2) ? Color.clear : Color(.systemGray6))
+
+                            Divider()
+                        }
+                    }
+                }
+            }
         }
-        refreshDBLog()
+    }
+
+    private func displayValue(for record: GlobalConfigRecord) -> String {
+        if record.value.isEmpty {
+            return "(空)"
+        }
+        if record.key == GlobalConfigKey.password {
+            return "******"
+        }
+        return record.value
+    }
+
+    private func refreshDBLog() {
+        switch selectedTable {
+        case "file_mapping":
+            dbLog = AppGroupDBManager.shared.fetchAllLog()
+        case "global_config":
+            configRecords = AppGroupDBManager.shared.fetchAllConfig()
+        default:
+            dbLog = "未知表"
+        }
+    }
+
+    private func clearDB() {
+        switch selectedTable {
+        case "file_mapping":
+            let records = AppGroupDBManager.shared.queryNonLocalVaultRecords()
+            let ids = records.map { $0.id }
+            if ids.isEmpty {
+                appLogger.info("🔍 [调试页面] 文件映射表没有未落盘数据可清空")
+            } else {
+                _ = AppGroupDBManager.shared.deleteRecord(ids: ids)
+                appLogger.info("🔍 [调试页面] 文件映射表已清空 \(ids.count) 条未落盘数据")
+            }
+        case "global_config":
+            _ = AppGroupDBManager.shared.clearAllConfig()
+            configRecords = AppGroupDBManager.shared.fetchAllConfig()
+            appLogger.info("🔍 [调试页面] 全局配置表已清空")
+        default:
+            break
+        }
+        if selectedTable == "file_mapping" {
+            dbLog = AppGroupDBManager.shared.fetchAllLog()
+        }
     }
 }
 

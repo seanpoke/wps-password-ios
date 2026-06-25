@@ -8,14 +8,97 @@ struct PasswordManagerApp: App {
     
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @Environment(\.scenePhase) private var scenePhase
+    @State private var showLogin = false
+    @State private var isCheckingToken = true
     
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            if isCheckingToken {
+                ProgressView("正在验证...")
+                    .onAppear {
+                        checkTokenAndNavigate()
+                    }
+            } else if showLogin {
+                LoginView(onLoginSuccess: {
+                    showLogin = false
+                    isCheckingToken = false
+                })
+            } else {
+                ContentView(onLogout: {
+                    performLogout()
+                })
+            }
         }
         .onChange(of: scenePhase) { phase in
             handleScenePhaseChange(phase)
         }
+    }
+    
+    private func checkTokenAndNavigate() {
+        appLogger.info("🔍 [App] 开始验证token")
+
+        guard let token = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.token), !token.isEmpty else {
+            appLogger.info("🔑 [App] 未找到token，跳转到登录页面")
+            DispatchQueue.main.async {
+                isCheckingToken = false
+                showLogin = true
+            }
+            return
+        }
+
+        let domain = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.domain) ?? ""
+        guard !domain.isEmpty else {
+            appLogger.info("🌐 [App] 未找到域名，跳转到登录页面")
+            DispatchQueue.main.async {
+                isCheckingToken = false
+                showLogin = true
+            }
+            return
+        }
+
+        let port = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.port) ?? ""
+
+        let baseURL = NetworkClient.shared.buildBaseURL(domain: domain, port: port)
+
+        NetworkClient.shared.configureIfNeeded(baseURL: baseURL)
+
+        NetworkClient.shared.refreshToken(token: token) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let data):
+                    appLogger.info("✅ [App] Token校验成功 | account: \(data.account)")
+
+                    _ = AppGroupDBManager.shared.setConfigValue(key: GlobalConfigKey.token, value: data.token)
+                    _ = AppGroupDBManager.shared.setConfigValue(key: GlobalConfigKey.name, value: data.name)
+                    _ = AppGroupDBManager.shared.setConfigValue(key: GlobalConfigKey.role, value: data.role)
+                    _ = AppGroupDBManager.shared.setConfigValue(key: GlobalConfigKey.account, value: data.account)
+
+                    appLogger.info("✅ [App] 用户信息已更新")
+
+                    isCheckingToken = false
+                    showLogin = false
+
+                case .failure(let error):
+                    appLogger.error("❌ [App] Token校验失败: \(error.localizedDescription)")
+                    AppGroupDBManager.shared.clearAllConfig()
+                    isCheckingToken = false
+                    showLogin = true
+                }
+            }
+        }
+    }
+    
+    private func performLogout() {
+        appLogger.info("🔓 [App] 用户注销")
+        
+        _ = AppGroupDBManager.shared.setConfigValue(key: GlobalConfigKey.token, value: "")
+        
+        DispatchQueue.main.async {
+            self.isCheckingToken = false
+            self.showLogin = true
+        }
+        
+        appLogger.info("✅ [App] 已跳转到登录页面")
     }
     
     private func handleScenePhaseChange(_ phase: ScenePhase) {

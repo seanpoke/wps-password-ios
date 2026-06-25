@@ -16,6 +16,40 @@ struct FileMappingRecord: Identifiable {
     let is_local_vault: Int
 }
 
+struct GlobalConfigRecord: Identifiable {
+    let key: String
+    let value: String
+    let remark: String
+
+    var id: String { key }
+}
+
+enum GlobalConfigKey {
+    static let token = "token"
+    static let name = "name"
+    static let role = "role"
+    static let account = "account"
+    static let password = "password"
+    static let domain = "domain"
+    static let port = "port"
+    static let publicKey = "public_key"
+    static let keyVersion = "key_version"
+    static let rememberPassword = "remember_password"
+
+    static let allKeys: [(key: String, remark: String)] = [
+        (token, "用户登录后的访问令牌，用于后续接口身份校验"),
+        (name, "用户姓名"),
+        (role, "用户角色"),
+        (account, "登录账号"),
+        (password, "登录密码（仅在勾选记住密码时保存）"),
+        (domain, "服务器域名或IP"),
+        (port, "服务器端口"),
+        (publicKey, "服务端公钥"),
+        (keyVersion, "密钥版本号"),
+        (rememberPassword, "是否记住密码")
+    ]
+}
+
 final class AppGroupDBManager {
 
     static let shared = AppGroupDBManager()
@@ -52,7 +86,8 @@ final class AppGroupDBManager {
             dbLogger.error("❌ [DB] 数据库路径为空，无法打开数据库")
             return
         }
-        guard sqlite3_open(self.dbPath, &db) == SQLITE_OK else {
+        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
+        guard sqlite3_open_v2(self.dbPath, &db, flags, nil) == SQLITE_OK else {
             dbLogger.error("❌ [DB] 无法打开数据库: \(self.dbPath, privacy: .public)")
             return
         }
@@ -76,6 +111,30 @@ final class AppGroupDBManager {
         execute(sql: "CREATE INDEX IF NOT EXISTS idx_access_time ON file_mapping_table(last_access_time);")
         execute(sql: "CREATE INDEX IF NOT EXISTS idx_update_time ON file_mapping_table(update_time);")
         execute(sql: "CREATE INDEX IF NOT EXISTS idx_filename_size ON file_mapping_table(file_name, file_size);")
+        execute(sql: """
+            CREATE TABLE IF NOT EXISTS global_config_table (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL DEFAULT '',
+                remark TEXT NOT NULL DEFAULT ''
+            );
+        """)
+        initializeDefaultConfigs()
+    }
+
+    private func initializeDefaultConfigs() {
+        for (key, remark) in GlobalConfigKey.allKeys {
+            let sql = "INSERT OR IGNORE INTO global_config_table (key, value, remark) VALUES (?, '', ?);"
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+                sqlite3_bind_text(stmt, 1, (key as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(stmt, 2, (remark as NSString).utf8String, -1, nil)
+                if sqlite3_step(stmt) != SQLITE_DONE {
+                    dbLogger.error("❌ [DB] 默认配置初始化失败 | key: \(key, privacy: .public)")
+                }
+                sqlite3_finalize(stmt)
+            }
+        }
+        dbLogger.info("✅ [DB] 全局配置默认key已初始化 | 共 \(GlobalConfigKey.allKeys.count) 项")
     }
 
     private func execute(sql: String) {
@@ -586,5 +645,116 @@ final class AppGroupDBManager {
         }
         let ids = records.map { $0.id }
         return deleteRecord(ids: ids)
+    }
+    
+    func getConfigValue(key: String) -> String? {
+        let sql = "SELECT value FROM global_config_table WHERE key = ? LIMIT 1;"
+        var stmt: OpaquePointer?
+        var result: String?
+
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, (key as NSString).utf8String, -1, nil)
+
+            if sqlite3_step(stmt) == SQLITE_ROW {
+                if let cString = sqlite3_column_text(stmt, 0) {
+                    result = String(cString: cString)
+                }
+            }
+        }
+
+        sqlite3_finalize(stmt)
+        return result
+    }
+
+    func setConfigValue(key: String, value: String) -> Bool {
+        let sql = "INSERT INTO global_config_table (key, value, remark) VALUES (?, ?, '') ON CONFLICT(key) DO UPDATE SET value = excluded.value;"
+        var stmt: OpaquePointer?
+
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, (key as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 2, (value as NSString).utf8String, -1, nil)
+
+            let result = sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+
+            if result == SQLITE_DONE {
+                dbLogger.info("✅ [DB] 配置写入成功 | key: \(key, privacy: .public)")
+                return true
+            }
+        }
+
+        dbLogger.error("❌ [DB] 配置写入失败 | key: \(key, privacy: .public)")
+        return false
+    }
+
+    func setConfigValues(_ pairs: [String: String]) -> Bool {
+        var allSuccess = true
+        for (key, value) in pairs {
+            if !setConfigValue(key: key, value: value) {
+                allSuccess = false
+            }
+        }
+        return allSuccess
+    }
+
+    func clearAllConfig() -> Bool {
+        let sql = "DELETE FROM global_config_table;"
+        var stmt: OpaquePointer?
+
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            let result = sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+
+            if result == SQLITE_DONE {
+                dbLogger.info("✅ [DB] 全局配置已清空")
+                return true
+            }
+        }
+
+        dbLogger.error("❌ [DB] 清空全局配置失败")
+        return false
+    }
+
+    func fetchAllConfig() -> [GlobalConfigRecord] {
+        let sql = "SELECT key, value, remark FROM global_config_table ORDER BY key;"
+        var stmt: OpaquePointer?
+        var records: [GlobalConfigRecord] = []
+
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let key = sqlite3_column_text(stmt, 0).flatMap { String(cString: $0) } ?? ""
+                let value = sqlite3_column_text(stmt, 1).flatMap { String(cString: $0) } ?? ""
+                let remark = sqlite3_column_text(stmt, 2).flatMap { String(cString: $0) } ?? ""
+                records.append(GlobalConfigRecord(key: key, value: value, remark: remark))
+            }
+        }
+        sqlite3_finalize(stmt)
+        return records
+    }
+
+    func fetchGlobalConfigLog() -> String {
+        let records = fetchAllConfig()
+        if records.isEmpty {
+            return "全局配置表当前为空"
+        }
+
+        var result = ""
+        for record in records {
+            let label = record.remark.isEmpty ? record.key : record.remark
+            let displayValue: String
+            if record.value.isEmpty {
+                displayValue = "(空)"
+            } else if record.key == GlobalConfigKey.password {
+                displayValue = "******"
+            } else if record.key == GlobalConfigKey.token {
+                displayValue = "\(record.value.prefix(8))..."
+            } else if record.key == GlobalConfigKey.publicKey {
+                displayValue = "\(record.value.prefix(20))..."
+            } else {
+                displayValue = record.value
+            }
+            result += "\(label)：\(displayValue)\n"
+        }
+        return result
     }
 }
