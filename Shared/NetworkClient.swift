@@ -6,6 +6,7 @@ let networkLogger = Logger(subsystem: "com.greenet.PasswordManager", category: "
 enum API {
     case login(account: String, password: String)
     case refreshToken(token: String)
+    case latestKey
 }
 
 extension API {
@@ -15,6 +16,8 @@ extension API {
             return "/account/login"
         case .refreshToken:
             return "/account/refresh-token"
+        case .latestKey:
+            return "/config/latest-key"
         }
     }
     
@@ -22,6 +25,8 @@ extension API {
         switch self {
         case .login, .refreshToken:
             return "POST"
+        case .latestKey:
+            return "GET"
         }
     }
     
@@ -45,7 +50,7 @@ extension API {
                     "password": password
                 ]
                 return try JSONSerialization.data(withJSONObject: params)
-            case .refreshToken:
+            case .refreshToken, .latestKey:
                 return nil
             }
         } catch {
@@ -73,6 +78,11 @@ struct RefreshTokenResponseData: Codable {
     let account: String
     let name: String
     let role: String
+}
+
+struct LatestKeyResponseData: Codable {
+    let keyVersion: String
+    let publicKey: String
 }
 
 final class NetworkClient: NSObject, URLSessionDelegate {
@@ -203,6 +213,10 @@ final class NetworkClient: NSObject, URLSessionDelegate {
     
     func refreshToken(token: String, completion: @escaping (Result<RefreshTokenResponseData, Error>) -> Void) {
         request(api: .refreshToken(token: token), completion: completion)
+    }
+    
+    func fetchLatestKey(completion: @escaping (Result<LatestKeyResponseData, Error>) -> Void) {
+        request(api: .latestKey, completion: completion)
     }
     
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {

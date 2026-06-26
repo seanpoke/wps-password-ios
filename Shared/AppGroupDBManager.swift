@@ -746,10 +746,6 @@ final class AppGroupDBManager {
                 displayValue = "(空)"
             } else if record.key == GlobalConfigKey.password {
                 displayValue = "******"
-            } else if record.key == GlobalConfigKey.token {
-                displayValue = "\(record.value.prefix(8))..."
-            } else if record.key == GlobalConfigKey.publicKey {
-                displayValue = "\(record.value.prefix(20))..."
             } else {
                 displayValue = record.value
             }

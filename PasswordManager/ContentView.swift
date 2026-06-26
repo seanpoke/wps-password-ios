@@ -89,15 +89,7 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text("\(userName)，你好")
-                            .font(.title)
-                            .fontWeight(.bold)
-                    }
-                    
-                    Spacer()
-                    
+                HStack(spacing: 12) {
                     Button(action: {
                         showLogoutSheet = true
                     }) {
@@ -113,9 +105,30 @@ struct ContentView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("\(userName)，你好")
+                            .font(.title)
+                            .fontWeight(.bold)
+                    }
+                    
+                    Spacer()
+                    
+                    Button(action: refreshList) {
+                        ZStack {
+                            Circle()
+                                .fill(Color(.systemGray5))
+                                .frame(width: 32, height: 32)
+                            
+                            Image(systemName: "arrow.clockwise")
+                                .font(.title3)
+                                .foregroundColor(.primary)
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.vertical, 16)
                 
                 SearchBar(text: $searchText)
                     .padding(.horizontal, 16)
@@ -166,18 +179,11 @@ struct ContentView: View {
                     EmptyView()
                 }
             }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button(action: refreshList) {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-            }
             .sheet(isPresented: $showDebugView) {
                 DebugDatabaseView()
             }
             .refreshable {
-                await loadRecords()
+                await refreshList()
             }
             .onAppear {
                 loadRecords()
@@ -302,6 +308,31 @@ struct ContentView: View {
         loadRecords()
         Task {
             await diskSpaceManager.checkDiskSpace()
+            let authSuccess = await refreshAuth()
+            if !authSuccess {
+                appLogger.info("🔐 [MainApp] Token刷新失败，跳转到登录页")
+                onLogout()
+            }
+        }
+    }
+    
+    private func refreshAuth() async -> Bool {
+        return await withCheckedContinuation { continuation in
+            APIService.shared.bootstrap { result in
+                switch result {
+                case .success(let bootstrapResult):
+                    if bootstrapResult.isAuthenticated {
+                        appLogger.info("✅ [MainApp] Token刷新成功")
+                        continuation.resume(returning: true)
+                    } else {
+                        appLogger.info("ℹ️ [MainApp] 未认证")
+                        continuation.resume(returning: false)
+                    }
+                case .failure(let error):
+                    appLogger.error("❌ [MainApp] Token刷新失败: \(error.localizedDescription)")
+                    continuation.resume(returning: false)
+                }
+            }
         }
     }
     
@@ -1057,7 +1088,6 @@ struct DebugDatabaseView: View {
                                     .font(.system(size: 12, design: .monospaced))
                                     .foregroundColor(.primary)
                                     .textSelection(.enabled)
-                                    .lineLimit(3)
                                     .frame(maxWidth: .infinity, alignment: .leading)
 
                                 Text(record.remark.isEmpty ? "-" : record.remark)

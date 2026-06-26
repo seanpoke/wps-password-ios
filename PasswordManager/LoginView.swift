@@ -175,23 +175,19 @@ struct LoginView: View {
         isLoading = true
         errorMessage = ""
         
-        let baseURL = buildBaseURL()
-        NetworkClient.shared.configure(baseURL: baseURL)
+        let normalizedDomain = normalizeDomain()
         
-        NetworkClient.shared.login(account: account, password: password) { result in
+        APIService.shared.login(account: account, password: password, domain: normalizedDomain, port: port, rememberPassword: rememberPassword) { result in
             DispatchQueue.main.async {
                 isLoading = false
                 
                 switch result {
-                case .success(let data):
-                    appLogger.info("✅ [Login] 登录成功 | account: \(data.account)")
-                    
-                    saveCredentials(data: data)
-                    
-                    onLoginSuccess()
+                case .success:
+                    appLogger.info("✅ [Login] 登录成功")
+                    self.onLoginSuccess()
                     
                 case .failure(let error):
-                    errorMessage = error.localizedDescription
+                    self.errorMessage = error.localizedDescription
                     appLogger.error("❌ [Login] 登录失败: \(error.localizedDescription)")
                 }
             }
@@ -215,25 +211,6 @@ struct LoginView: View {
         }
         self.domain = savedDomain
         self.port = savedPort
-    }
-
-    private func saveCredentials(data: LoginResponseData) {
-        let normalizedDomain = normalizeDomain()
-        let pairs: [String: String] = [
-            GlobalConfigKey.token: data.token,
-            GlobalConfigKey.name: data.name,
-            GlobalConfigKey.role: data.role,
-            GlobalConfigKey.account: data.account,
-            GlobalConfigKey.password: rememberPassword ? password : "",
-            GlobalConfigKey.domain: normalizedDomain,
-            GlobalConfigKey.port: port,
-            GlobalConfigKey.rememberPassword: rememberPassword ? "true" : "false"
-        ]
-        let success = AppGroupDBManager.shared.setConfigValues(pairs)
-
-        if success {
-            appLogger.info("✅ [Login] 登录信息已保存")
-        }
     }
 }
 

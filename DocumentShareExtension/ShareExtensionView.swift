@@ -8,6 +8,7 @@ let shareExtensionLogger = Logger(subsystem: "com.greenet.PasswordManager", cate
 @MainActor
 enum ActionState: CustomStringConvertible {
     case identifying
+    case loginCanvas
     case greenCanvas
     case yellowCanvas
     case blueCanvasA
@@ -17,6 +18,7 @@ enum ActionState: CustomStringConvertible {
     var description: String {
         switch self {
         case .identifying: return "identifying"
+        case .loginCanvas: return "loginCanvas"
         case .greenCanvas: return "greenCanvas"
         case .yellowCanvas: return "yellowCanvas"
         case .blueCanvasA: return "blueCanvasA"
@@ -76,6 +78,15 @@ struct ShareExtensionView: View {
     @State private var showPasswordInputDialog: Bool = false
     @State private var pendingAction: PendingAction = .none
     
+    @State private var loginAccount = ""
+    @State private var loginPassword = ""
+    @State private var loginDomain = ""
+    @State private var loginPort = ""
+    @State private var loginRememberPassword = false
+    @State private var loginIsLoading = false
+    @State private var loginErrorMessage = ""
+    @State private var loginDomainError = ""
+    
     private let appGroupID = "group.com.greenet.PasswordManager"
     private let tempInboxDir = "Temp_Inbox"
     private let safeVaultDir = "SafeVault"
@@ -93,6 +104,9 @@ struct ShareExtensionView: View {
             switch actionState {
             case .identifying:
                 identifyingView
+                    .background(Color.gray)
+            case .loginCanvas:
+                loginCanvasView
                     .background(Color.gray)
             case .greenCanvas:
                 greenCanvasView
@@ -123,7 +137,14 @@ struct ShareExtensionView: View {
         }
         .onAppear {
             shareExtensionLogger.info("✅ [EXT] ===== View onAppear 触发 ===== ")
+            loadSavedLoginCredentials()
             Task {
+                let authSuccess = await bootstrapAuth()
+                if !authSuccess {
+                    shareExtensionLogger.info("🔐 [EXT] 认证失败，跳转到登录页")
+                    actionState = .loginCanvas
+                    return
+                }
                 shareExtensionLogger.info("✅ [EXT] 开始执行 processIncomingFiles")
                 await processIncomingFiles()
                 shareExtensionLogger.info("✅ [EXT] processIncomingFiles 执行完毕，当前状态: \(actionState)")
@@ -157,6 +178,95 @@ struct ShareExtensionView: View {
             
             Spacer()
         }
+    }
+    
+    private var loginCanvasView: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 60)
+            
+            VStack(spacing: 24) {
+                VStack(spacing: 16) {
+                    InputField(
+                        label: "账号",
+                        placeholder: "请输入账号",
+                        text: $loginAccount,
+                        keyboardType: .emailAddress
+                    )
+                    
+                    InputField(
+                        label: "密码",
+                        placeholder: "请输入密码",
+                        text: $loginPassword,
+                        isSecure: true
+                    )
+                    
+                    InputField(
+                        label: "域名",
+                        placeholder: "请输入服务器域名或IP",
+                        text: $loginDomain,
+                        errorMessage: loginDomainError
+                    )
+                    .onChange(of: loginDomain) {
+                        validateLoginDomain()
+                    }
+                    
+                    InputField(
+                        label: "端口",
+                        placeholder: "请输入端口号",
+                        text: $loginPort,
+                        keyboardType: .numberPad
+                    )
+                    
+                    HStack(spacing: 8) {
+                        Button(action: {
+                            loginRememberPassword.toggle()
+                        }) {
+                            Image(systemName: loginRememberPassword ? "checkmark.square.fill" : "square")
+                                .foregroundColor(loginRememberPassword ? .blue : .gray)
+                                .font(.system(size: 20))
+                        }
+                        
+                        Text("记住密码")
+                            .font(.body)
+                            .foregroundColor(.white)
+                        
+                        Spacer()
+                    }
+                }
+                
+                if !loginErrorMessage.isEmpty {
+                    Text(loginErrorMessage)
+                        .foregroundColor(.red)
+                        .font(.caption)
+                        .multilineTextAlignment(.center)
+                }
+                
+                Button(action: performLogin) {
+                    if loginIsLoading {
+                        ProgressView()
+                            .tint(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.blue)
+                            .cornerRadius(12)
+                    } else {
+                        Text("登录")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.blue)
+                            .cornerRadius(12)
+                    }
+                }
+                .disabled(loginIsLoading || !loginIsFormValid)
+                .opacity(loginIsLoading || !loginIsFormValid ? 0.6 : 1.0)
+            }
+            .padding()
+            
+            Spacer(minLength: 60)
+        }
+        .frame(maxHeight: .infinity)
     }
     
     private var greenCanvasView: some View {
@@ -722,6 +832,111 @@ struct ShareExtensionView: View {
             break
         }
         pendingAction = .none
+    }
+    
+    private func loadSavedLoginCredentials() {
+        let savedAccount = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.account) ?? ""
+        let savedPassword = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.password) ?? ""
+        let savedDomain = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.domain) ?? ""
+        let savedPort = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.port) ?? ""
+        let savedRememberPassword = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.rememberPassword) ?? "false"
+
+        loginRememberPassword = savedRememberPassword == "true"
+
+        if loginRememberPassword {
+            loginAccount = savedAccount
+            loginPassword = savedPassword
+        } else {
+            loginAccount = savedAccount
+        }
+        loginDomain = savedDomain
+        loginPort = savedPort
+    }
+    
+    private var loginIsFormValid: Bool {
+        !loginAccount.isEmpty && !loginPassword.isEmpty && !loginDomain.isEmpty && loginDomainError.isEmpty
+    }
+    
+    private func validateLoginDomain() {
+        let trimmedDomain = loginDomain.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if trimmedDomain.isEmpty {
+            loginDomainError = ""
+            return
+        }
+        
+        if trimmedDomain.hasPrefix("http://") {
+            loginDomainError = "仅支持HTTPS协议"
+            return
+        }
+        
+        loginDomainError = ""
+    }
+    
+    private func normalizeLoginDomain() -> String {
+        var normalized = loginDomain.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if !normalized.hasPrefix("http://") && !normalized.hasPrefix("https://") {
+            normalized = "https://" + normalized
+        }
+        
+        if normalized.hasPrefix("http://") {
+            normalized = normalized.replacingOccurrences(of: "http://", with: "https://")
+        }
+        
+        return normalized
+    }
+    
+    private func performLogin() {
+        guard loginIsFormValid else {
+            loginErrorMessage = "请填写完整的登录信息"
+            return
+        }
+        
+        loginIsLoading = true
+        loginErrorMessage = ""
+        
+        let normalizedDomain = normalizeLoginDomain()
+        
+        APIService.shared.login(account: loginAccount, password: loginPassword, domain: normalizedDomain, port: loginPort, rememberPassword: loginRememberPassword) { result in
+            DispatchQueue.main.async {
+                self.loginIsLoading = false
+                
+                switch result {
+                case .success:
+                    shareExtensionLogger.info("✅ [EXT] 登录成功，开始执行文件处理")
+                    Task {
+                        await self.processIncomingFiles()
+                        shareExtensionLogger.info("✅ [EXT] 登录后 processIncomingFiles 执行完毕，当前状态: \(self.actionState)")
+                    }
+                    
+                case .failure(let error):
+                    self.loginErrorMessage = error.localizedDescription
+                    shareExtensionLogger.error("❌ [EXT] 登录失败: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+    
+    private func bootstrapAuth() async -> Bool {
+        shareExtensionLogger.info("🔐 [EXT] 启动认证初始化")
+        return await withCheckedContinuation { continuation in
+            APIService.shared.bootstrap { result in
+                switch result {
+                case .success(let bootstrapResult):
+                    if bootstrapResult.isAuthenticated {
+                        shareExtensionLogger.info("✅ [EXT] Token刷新成功")
+                        continuation.resume(returning: true)
+                    } else {
+                        shareExtensionLogger.info("ℹ️ [EXT] 未登录，跳过认证")
+                        continuation.resume(returning: false)
+                    }
+                case .failure(let error):
+                    shareExtensionLogger.error("❌ [EXT] 认证初始化失败: \(error.localizedDescription)")
+                    continuation.resume(returning: false)
+                }
+            }
+        }
     }
     
     private func processIncomingFiles() async {
@@ -1941,6 +2156,55 @@ struct ShareExtensionView: View {
                 }
             } catch {
                 shareExtensionLogger.error("❌ 清理临时目录失败: \(error, privacy: .public)")
+            }
+        }
+    }
+}
+
+struct InputField: View {
+    let label: String
+    let placeholder: String
+    @Binding var text: String
+    let isSecure: Bool
+    let keyboardType: UIKeyboardType
+    let errorMessage: String
+    
+    init(label: String, placeholder: String, text: Binding<String>, isSecure: Bool = false, keyboardType: UIKeyboardType = .default, errorMessage: String = "") {
+        self.label = label
+        self.placeholder = placeholder
+        self._text = text
+        self.isSecure = isSecure
+        self.keyboardType = keyboardType
+        self.errorMessage = errorMessage
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 12) {
+                Text(label)
+                    .font(.body)
+                    .foregroundColor(.white)
+                    .frame(width: 60, alignment: .leading)
+                
+                if isSecure {
+                    SecureField(placeholder, text: $text)
+                        .keyboardType(keyboardType)
+                        .padding()
+                        .background(Color.black.opacity(0.3))
+                        .cornerRadius(8)
+                } else {
+                    TextField(placeholder, text: $text)
+                        .keyboardType(keyboardType)
+                        .padding()
+                        .background(Color.black.opacity(0.3))
+                        .cornerRadius(8)
+                }
+            }
+            
+            if !errorMessage.isEmpty {
+                Text(errorMessage)
+                    .foregroundColor(.red)
+                    .font(.caption)
             }
         }
     }
