@@ -271,7 +271,7 @@ final class APIService {
         }
     }
     
-    func fetchDocPassword(docId: String, encryPassword: String, isTemp: Bool = false, completion: @escaping (Result<String, Error>) -> Void) {
+    func fetchDocPassword(docId: String, encryPassword: String, isTemp: Bool = false, customKeyVersion: String? = nil, completion: @escaping (Result<String, Error>) -> Void) {
         let token = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.token) ?? ""
         guard !token.isEmpty else {
             apiLogger.error("❌ [API] 获取文档密码：token为空")
@@ -285,7 +285,7 @@ final class APIService {
             return
         }
 
-        let keyVersion = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.keyVersion)
+        let keyVersion = customKeyVersion ?? AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.keyVersion)
         
         apiLogger.info("🔍 [API] 开始获取文档密码 | docId: \(docId, privacy: .public) | keyVersion: \(keyVersion ?? "default") | isTemp: \(isTemp)")
 

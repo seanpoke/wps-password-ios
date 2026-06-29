@@ -181,11 +181,13 @@ final class ZipExtraFieldManager {
                 let passwordMarker = buildMarker(type: MetadataType.password.rawValue, data: password)
                 fileHandle.write(passwordMarker)
                 zipLogger.info("✅ 写入 PASSWORD 标记 | 值: \(password)")
+                
+                let keyVersionMarker = buildMarker(type: MetadataType.keyVersion.rawValue, data: keyVersion)
+                fileHandle.write(keyVersionMarker)
+                zipLogger.info("✅ 写入 KEY_VERSION 标记 | 值: \(keyVersion)")
+            } else {
+                zipLogger.debug("⏭️ 无密码元数据，跳过密钥版本标记写入")
             }
-            
-            let keyVersionMarker = buildMarker(type: MetadataType.keyVersion.rawValue, data: keyVersion)
-            fileHandle.write(keyVersionMarker)
-            zipLogger.info("✅ 写入 KEY_VERSION 标记 | 值: \(keyVersion)")
             
             return true
         } catch {

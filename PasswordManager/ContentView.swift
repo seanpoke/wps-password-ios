@@ -85,6 +85,7 @@ struct ContentView: View {
     @StateObject private var docInteractionManager = DocumentInteractionManager()
     @ObservedObject private var diskSpaceManager = DiskSpaceManager.shared
     @State private var showDiskSpaceWarning = false
+    @State private var shareItem: ShareItem?
     
     var body: some View {
         NavigationStack {
@@ -146,6 +147,8 @@ struct ContentView: View {
                             selectedRecord = record
                         }, onPreviewTap: {
                             openFilePreview(record: record)
+                        }, onShareTap: {
+                            shareFile(record: record)
                         })
                     }
                     .onDelete(perform: requestDelete)
@@ -269,6 +272,9 @@ struct ContentView: View {
                 }
                 .padding()
                 .presentationDetents([.height(200)])
+            }
+            .sheet(item: $shareItem) { item in
+                ShareSheet(item: item)
             }
         }
     }
@@ -433,7 +439,7 @@ struct ContentView: View {
         
         if isOwner {
             appLogger.info("👤 当前用户为文档所属人，获取明文密码")
-            fetchAndCopyPassword(docId: record.uid, encryPassword: record.password) {
+            resolvePasswordAndFetch(record: record, fileURL: fileURL) {
                 self.presentFile(fileURL: fileURL, record: record, usePreview: usePreview)
             }
         } else {
@@ -444,7 +450,7 @@ struct ContentView: View {
                     case .success(let info):
                         if info.hasAnyAuth {
                             appLogger.info("✅ 权限校验通过，获取明文密码 | read: \(info.readAuth) | write: \(info.writeAuth)")
-                            self.fetchAndCopyPassword(docId: record.uid, encryPassword: record.password) {
+                            self.resolvePasswordAndFetch(record: record, fileURL: fileURL) {
                                 self.presentFile(fileURL: fileURL, record: record, usePreview: usePreview)
                             }
                         } else {
@@ -464,8 +470,34 @@ struct ContentView: View {
         }
     }
     
-    private func fetchAndCopyPassword(docId: String, encryPassword: String, completion: @escaping () -> Void) {
-        APIService.shared.fetchDocPassword(docId: docId, encryPassword: encryPassword, isTemp: false) { result in
+    private func resolvePasswordAndFetch(record: FileMappingRecord, fileURL: URL, completion: @escaping () -> Void) {
+        // 数据库存储的是明文密码，直接使用，无需调接口解密
+        if !record.password.isEmpty {
+            appLogger.info("📂 从数据库读取明文密码")
+            copyPasswordToClipboard(password: record.password)
+            completion()
+            return
+        }
+        
+        // 数据库中密码不存在，从文件尾部读取加密后的密码，调接口解密
+        if let tailPassword = ZipExtraFieldManager.shared.readPassword(from: fileURL), !tailPassword.isEmpty {
+            let tailKeyVersion = ZipExtraFieldManager.shared.readKeyVersion(from: fileURL)
+            appLogger.info("📦 从文件尾部读取加密密码，调接口解密 | keyVersion: \(tailKeyVersion ?? "nil")")
+            fetchAndCopyPassword(docId: record.uid, encryPassword: tailPassword, customKeyVersion: tailKeyVersion) {
+                completion()
+            }
+            return
+        }
+        
+        // 数据库和文件尾部均无密码
+        appLogger.warning("⚠️ 数据库和文件尾部均无密码，跳过密码获取")
+        UIPasteboard.general.string = nil
+        self.showToast(message: "未找到文档密码")
+        completion()
+    }
+    
+    private func fetchAndCopyPassword(docId: String, encryPassword: String, customKeyVersion: String? = nil, completion: @escaping () -> Void) {
+        APIService.shared.fetchDocPassword(docId: docId, encryPassword: encryPassword, isTemp: false, customKeyVersion: customKeyVersion) { result in
             DispatchQueue.main.async {
                 switch result {
                 case .success(let plainPassword):
@@ -548,6 +580,55 @@ struct ContentView: View {
         }
     }
     
+    private func shareFile(record: FileMappingRecord) {
+        let appGroupID = "group.com.greenet.PasswordManager"
+        let safeVaultDir = "SafeVault"
+        
+        guard let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: appGroupID
+        ) else {
+            return
+        }
+        
+        let vaultDir = containerURL.appendingPathComponent(safeVaultDir, isDirectory: true)
+        let dbFileName = record.file_name
+        var fileURL = vaultDir.appendingPathComponent(dbFileName)
+        
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            do {
+                let files = try FileManager.default.contentsOfDirectory(at: vaultDir, includingPropertiesForKeys: nil)
+                for candidateURL in files {
+                    if candidateURL.lastPathComponent.lowercased() == dbFileName.lowercased() {
+                        fileURL = candidateURL
+                        break
+                    }
+                }
+            } catch {
+                appLogger.error("❌ 分享-遍历保险箱目录失败: \(error)")
+                return
+            }
+        }
+        
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            appLogger.error("❌ 分享-文件不存在: \(fileURL.path)")
+            return
+        }
+        
+        let tempDir = FileManager.default.temporaryDirectory
+        let tempFileURL = tempDir.appendingPathComponent(record.file_name)
+        
+        do {
+            if FileManager.default.fileExists(atPath: tempFileURL.path) {
+                try FileManager.default.removeItem(at: tempFileURL)
+            }
+            try FileManager.default.copyItem(at: fileURL, to: tempFileURL)
+            appLogger.info("📤 分享-文件已复制到临时目录: \(tempFileURL.path)")
+            self.shareItem = ShareItem(url: tempFileURL, fileName: record.file_name)
+        } catch {
+            appLogger.error("❌ 分享-复制文件失败: \(error)")
+        }
+    }
+    
     private func showToast(message: String) {
         toastMessage = message
         toastVisible = true
@@ -609,6 +690,7 @@ struct AssetRow: View {
     let onTap: () -> Void
     let onLockTap: () -> Void
     let onPreviewTap: () -> Void
+    let onShareTap: () -> Void
     
     var body: some View {
         HStack(spacing: 16) {
@@ -636,6 +718,13 @@ struct AssetRow: View {
             .onTapGesture(perform: onTap)
             
             Spacer()
+            
+            Button(action: onShareTap) {
+                Image(systemName: "square.and.arrow.up")
+                    .foregroundColor(.gray)
+                    .font(.title2)
+            }
+            .buttonStyle(.plain)
             
             Button(action: onPreviewTap) {
                 Image(systemName: "eye.fill")
@@ -1252,6 +1341,26 @@ struct DebugDatabaseView: View {
             dbLog = AppGroupDBManager.shared.fetchAllLog()
         }
     }
+}
+
+struct ShareItem: Identifiable {
+    let id = UUID()
+    let url: URL
+    let fileName: String
+}
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let item: ShareItem
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(
+            activityItems: [item.url],
+            applicationActivities: nil
+        )
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 import CommonCrypto
