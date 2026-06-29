@@ -442,13 +442,15 @@ final class AppGroupDBManager {
                     let isLocalStr = isLocal == 1 ? "已落盘" : "未落盘"
 
                     result += "📄 文件: \(name)\n"
-                    result += "   ID: \(id) | UID: \(uid)\n"
+                    result += "   ID: \(id)\n"
+                    result += "   UID: \(uid)\n"
                     result += "   密码: \(hash)\n"
                     result += "   所属人: \(owner.isEmpty ? "(无)" : owner)\n"
                     result += "   创建时间: \(createTime) (\(formattedCreateTime))\n"
                     result += "   修改时间: \(updateTime) (\(formattedUpdateTime))\n"
                     result += "   访问时间: \(accessTime) (\(formattedAccessTime))\n"
-                    result += "   大小: \(fileSize) | 状态: \(isLocalStr)\n\n"
+                    result += "   大小: \(fileSize)\n"
+                    result += "   状态: \(isLocalStr)\n\n"
                 }
             }
         }

@@ -310,7 +310,7 @@ struct ShareExtensionView: View {
             }
             
             Button(action: copyPasswordAndExit) {
-                Text(hasPasswordInMetadata ? "复制密码并退场" : "当前文档无密码")
+                Text(hasPasswordInMetadata ? "复制密码" : "当前文档无密码")
                     .font(.headline)
                     .foregroundColor(.green)
                     .padding()

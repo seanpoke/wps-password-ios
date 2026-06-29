@@ -189,6 +189,12 @@ final class NetworkClient: NSObject, URLSessionDelegate {
         
         networkLogger.info("🔄 [Network] 发起请求 | \(api.method) \(api.path)")
         
+        if let body = request.httpBody, let bodyString = String(data: body, encoding: .utf8) {
+            networkLogger.info("📤 [Network] 请求体(入参): \(bodyString, privacy: .public)")
+        } else {
+            networkLogger.info("📤 [Network] 请求体(入参): 无")
+        }
+        
         let task = session.dataTask(with: request) { [weak self] data, response, error in
             guard let self = self else { return }
             
@@ -206,6 +212,12 @@ final class NetworkClient: NSObject, URLSessionDelegate {
             
             networkLogger.info("📤 [Network] 收到响应 | 状态码: \(httpResponse.statusCode)")
             
+            if let data = data, let responseString = String(data: data, encoding: .utf8) {
+                networkLogger.info("📥 [Network] 响应体(出参): \(responseString, privacy: .public)")
+            } else {
+                networkLogger.info("📥 [Network] 响应体(出参): 无")
+            }
+            
             guard (200...299).contains(httpResponse.statusCode) else {
                 let errorMessage = self.parseErrorMessage(data: data)
                 networkLogger.error("❌ [Network] 服务端错误 | 状态码: \(httpResponse.statusCode) | 消息: \(errorMessage, privacy: .public)")
@@ -221,6 +233,12 @@ final class NetworkClient: NSObject, URLSessionDelegate {
             
             do {
                 let apiResponse = try JSONDecoder().decode(APIResponse<T>.self, from: data)
+                
+                guard (200...299).contains(apiResponse.status) else {
+                    networkLogger.error("❌ [Network] 业务状态码异常 | status: \(apiResponse.status) | message: \(apiResponse.message, privacy: .public)")
+                    completion(.failure(NetworkError.serverError(code: apiResponse.status, message: apiResponse.message)))
+                    return
+                }
                 
                 if let data = apiResponse.data {
                     networkLogger.info("✅ [Network] 请求成功 | \(api.path)")

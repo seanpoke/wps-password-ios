@@ -714,6 +714,10 @@ struct FileIconView: View {
 struct AssetDetailView: View {
     let record: FileMappingRecord
     
+    @State private var metadataUid: String = ""
+    @State private var metadataPassword: String = ""
+    @State private var metadataKeyVersion: String = ""
+    
     private var fileType: String {
         let lowerName = record.file_name.lowercased()
         if lowerName.hasSuffix(".docx") {
@@ -764,9 +768,9 @@ struct AssetDetailView: View {
                             .font(.headline)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         
-                        InfoRow(label: "uid", value: record.uid)
-                        InfoRow(label: "密码", value: record.password)
-                        InfoRow(label: "密钥版本", value: "1.0")
+                        InfoRow(label: "uid", value: metadataUid)
+                        InfoRow(label: "密码", value: metadataPassword)
+                        InfoRow(label: "密钥版本", value: metadataKeyVersion)
                     }
                     
                     Divider()
@@ -786,6 +790,54 @@ struct AssetDetailView: View {
                 .padding()
             }
             .navigationTitle("文件信息")
+            .onAppear {
+                loadMetadataFromFile()
+            }
+        }
+    }
+    
+    private func loadMetadataFromFile() {
+        let appGroupID = "group.com.greenet.PasswordManager"
+        let safeVaultDir = "SafeVault"
+        
+        guard let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: appGroupID
+        ) else {
+            return
+        }
+        
+        let vaultDir = containerURL.appendingPathComponent(safeVaultDir, isDirectory: true)
+        let dbFileName = record.file_name
+        var fileURL = vaultDir.appendingPathComponent(dbFileName)
+        
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            do {
+                let files = try FileManager.default.contentsOfDirectory(at: vaultDir, includingPropertiesForKeys: nil)
+                for candidateURL in files {
+                    if candidateURL.lastPathComponent.lowercased() == dbFileName.lowercased() {
+                        fileURL = candidateURL
+                        break
+                    }
+                }
+            } catch {
+                appLogger.error("❌ 遍历保险箱目录失败: \(error, privacy: .public)")
+            }
+        }
+        
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return
+        }
+        
+        if let uid = ZipExtraFieldManager.shared.readUid(from: fileURL) {
+            metadataUid = uid
+        }
+        
+        if let password = ZipExtraFieldManager.shared.readPassword(from: fileURL) {
+            metadataPassword = password
+        }
+        
+        if let keyVersion = ZipExtraFieldManager.shared.readKeyVersion(from: fileURL) {
+            metadataKeyVersion = keyVersion
         }
     }
     
