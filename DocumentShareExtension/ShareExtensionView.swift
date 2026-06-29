@@ -1155,8 +1155,13 @@ struct ShareExtensionView: View {
             shareExtensionLogger.info("❌ [EXT] 检测到尾部无元数据")
             
             if hostType == .wps {
-                shareExtensionLogger.info("🔄 [EXT] 宿主为WPS，进入通路4：正常写回")
-                await enterPath4(tempURL: tempURL, fileName: fileName)
+                if !isEncryptedFile {
+                    shareExtensionLogger.info("🔄 [EXT] 宿主为WPS，文件未加密且无元数据，跳过密码撞击，直接进入新文件登记")
+                    actionState = .blueCanvasB
+                } else {
+                    shareExtensionLogger.info("🔄 [EXT] 宿主为WPS，进入通路4：正常写回")
+                    await enterPath4(tempURL: tempURL, fileName: fileName)
+                }
             } else {
                 shareExtensionLogger.info("🌿 [EXT] 宿主为外部，进入通路3：野生文件")
                 await enterPath3(tempURL: tempURL, fileName: fileName)
@@ -1264,14 +1269,112 @@ struct ShareExtensionView: View {
                     actionState = .blueCanvasA
                 }
             } else {
-                shareExtensionLogger.warning("⚠️ [通路2] 数据库无记录，降级到蓝色画布B，保留文件原有UID")
+                shareExtensionLogger.warning("⚠️ [通路2] 数据库无记录，文件加密状态: \(isEncryptedFile)，尝试top5密码碰撞")
                 matchedUID = uid
+                
+                if isEncryptedFile {
+                    let (matchedRecord, foundPassword) = await performTop5PasswordCollision(tempURL: tempURL, logPrefix: "通路2")
+                    if let record = matchedRecord, let password = foundPassword {
+                        shareExtensionLogger.info("✅ [通路2] top5密码碰撞成功! 匹配记录: \(record.file_name)")
+                        matchedAssetName = record.file_name
+                        matchedIsLocalVault = record.is_local_vault
+                        capturedPassword = password
+                        actionState = .blueCanvasA
+                        return
+                    }
+                    shareExtensionLogger.warning("⚠️ [通路2] top5密码碰撞失败，降级到蓝色画布B")
+                } else {
+                    shareExtensionLogger.info("ℹ️ [通路2] 文件未加密，跳过密码碰撞")
+                }
                 actionState = .blueCanvasB
             }
         } else {
             shareExtensionLogger.error("❌ [通路2] 无法提取UID，降级到通路4")
             await enterPath4(tempURL: tempURL, fileName: fileName)
         }
+    }
+    
+    /// Top 5 密码碰撞：用数据库中前5条活跃记录的密码尝试解密文件
+    /// - Returns: (匹配到的记录, 明文密码) 或 (nil, nil)
+    private func performTop5PasswordCollision(tempURL: URL, logPrefix: String) async -> (FileMappingRecord?, String?) {
+        shareExtensionLogger.info("📋 [\(logPrefix)] 获取前5条活跃记录用于密码碰撞")
+        
+        let topRecords = AppGroupDBManager.shared.queryTopActiveRecords(limit: 5)
+        shareExtensionLogger.info("📋 [\(logPrefix)] 获取到\(topRecords.count)条活跃记录")
+        
+        for (index, record) in topRecords.enumerated() {
+            shareExtensionLogger.info("🔐 [\(logPrefix)] 尝试记录 \(index+1)/\(topRecords.count): \(record.file_name) | 落盘状态: \(record.is_local_vault == 1 ? "已落盘" : "未落盘")")
+            
+            // 第一步：尝试数据库明文密码直接验证
+            let dbPassword = record.password
+            if !dbPassword.isEmpty {
+                shareExtensionLogger.info("🔐 [\(logPrefix)] 尝试数据库明文密码直接验证")
+                let verificationResult = await self.verifyPassword(fileURL: tempURL, password: dbPassword)
+                
+                if verificationResult {
+                    shareExtensionLogger.info("✅ [\(logPrefix)] 数据库明文密码撞击成功! 匹配记录: \(record.file_name)")
+                    return (record, dbPassword)
+                }
+                shareExtensionLogger.info("❌ [\(logPrefix)] 数据库明文密码验证失败")
+            }
+            
+            // 第二步：仅已落盘记录才尝试从对应保险箱文件尾部元数据获取真实密码
+            if record.is_local_vault != 1 {
+                shareExtensionLogger.info("⚠️ [\(logPrefix)] 记录未落盘，跳过元数据密码尝试")
+                continue
+            }
+            
+            guard let containerURL = FileManager.default.containerURL(
+                forSecurityApplicationGroupIdentifier: appGroupID
+            ) else {
+                shareExtensionLogger.error("❌ [\(logPrefix)] 无法获取App Group容器路径")
+                continue
+            }
+            
+            let vaultFileURL = containerURL
+                .appendingPathComponent(safeVaultDir, isDirectory: true)
+                .appendingPathComponent(record.file_name)
+            
+            let vaultFileExists = FileManager.default.fileExists(atPath: vaultFileURL.path)
+            shareExtensionLogger.info("📦 [\(logPrefix)] 保险箱文件路径: \(vaultFileURL.path) | 存在: \(vaultFileExists)")
+            
+            guard vaultFileExists else {
+                shareExtensionLogger.warning("⚠️ [\(logPrefix)] 保险箱文件不存在，跳过元数据密码尝试")
+                continue
+            }
+            
+            let fileEncryPassword = ZipExtraFieldManager.shared.readPassword(from: vaultFileURL)
+            let fileKeyVersion = ZipExtraFieldManager.shared.readKeyVersion(from: vaultFileURL)
+            
+            if let fileEncryPassword = fileEncryPassword, let fileKeyVersion = fileKeyVersion {
+                shareExtensionLogger.info("🔐 [\(logPrefix)] 从保险箱文件尾部元数据获取到加密密码和密钥版本，请求API解密")
+                let plainPassword = await self.fetchPlainPasswordAsync(uid: record.uid, encryPassword: fileEncryPassword, keyVersion: fileKeyVersion)
+                
+                if let plainPassword = plainPassword {
+                    // 如果API解密后的密码与数据库明文一致，说明第一步已尝试失败，无需重复验证
+                    if !dbPassword.isEmpty && plainPassword == dbPassword {
+                        shareExtensionLogger.info("⏭️ [\(logPrefix)] API解密密码与数据库明文一致，第一步已验证失败，跳过")
+                        continue
+                    }
+                    
+                    shareExtensionLogger.info("🔐 [\(logPrefix)] 获取到明文密码: \(plainPassword)，开始验证")
+                    let verificationResult = await self.verifyPassword(fileURL: tempURL, password: plainPassword)
+                    
+                    if verificationResult {
+                        shareExtensionLogger.info("✅ [\(logPrefix)] 密码撞击成功! 匹配记录: \(record.file_name)")
+                        return (record, plainPassword)
+                    }
+                    shareExtensionLogger.info("❌ [\(logPrefix)] 元数据密码撞击失败")
+                } else {
+                    shareExtensionLogger.warning("⚠️ [\(logPrefix)] API获取明文密码失败，跳过该记录")
+                }
+            } else {
+                shareExtensionLogger.warning("⚠️ [\(logPrefix)] 保险箱文件尾部无加密密码元数据，跳过该记录")
+            }
+        }
+        
+        shareExtensionLogger.info("❌ [\(logPrefix)] 所有\(topRecords.count)条密码均撞击失败")
+        return (nil, nil)
     }
     
     private func enterPath3(tempURL: URL, fileName: String) async {
@@ -1291,35 +1394,7 @@ struct ShareExtensionView: View {
         
         isBruteForcing = true
         
-        let task = Task.detached { () -> (FileMappingRecord?, String?) in
-            let topRecords = AppGroupDBManager.shared.queryTopActiveRecords(limit: 5)
-            shareExtensionLogger.info("📋 [通路4] 获取前\(topRecords.count)条活跃记录")
-            
-            for (index, record) in topRecords.enumerated() {
-                shareExtensionLogger.info("🔐 [通路4] 尝试记录 \(index+1)/\(topRecords.count): \(record.file_name)")
-                
-                let plainPassword = await self.fetchPlainPasswordAsync(uid: record.uid, encryPassword: record.password)
-                
-                if let plainPassword = plainPassword {
-                    shareExtensionLogger.info("🔐 [通路4] 获取到明文密码，开始验证")
-                    let verificationResult = await self.verifyPassword(fileURL: tempURL, password: plainPassword)
-                    
-                    if verificationResult {
-                        shareExtensionLogger.info("✅ [通路4] 密码撞击成功! 匹配记录: \(record.file_name)")
-                        return (record, plainPassword)
-                    }
-                    
-                    shareExtensionLogger.info("❌ [通路4] 密码撞击失败")
-                } else {
-                    shareExtensionLogger.warning("⚠️ [通路4] 获取明文密码失败，跳过该记录")
-                }
-            }
-            
-            shareExtensionLogger.info("❌ [通路4] 所有\(topRecords.count)条密码均撞击失败")
-            return (nil, nil)
-        }
-        
-        let (matchedRecord, foundPassword) = await task.value
+        let (matchedRecord, foundPassword) = await performTop5PasswordCollision(tempURL: tempURL, logPrefix: "通路4")
         
         isBruteForcing = false
         
@@ -1336,9 +1411,9 @@ struct ShareExtensionView: View {
         }
     }
     
-    private func fetchPlainPasswordAsync(uid: String, encryPassword: String) async -> String? {
+    private func fetchPlainPasswordAsync(uid: String, encryPassword: String, keyVersion: String? = nil) async -> String? {
         return await withCheckedContinuation { continuation in
-            APIService.shared.fetchDocPassword(docId: uid, encryPassword: encryPassword, isTemp: false) { result in
+            APIService.shared.fetchDocPassword(docId: uid, encryPassword: encryPassword, isTemp: false, customKeyVersion: keyVersion) { result in
                 switch result {
                 case .success(let password):
                     continuation.resume(returning: password)
