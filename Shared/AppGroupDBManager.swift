@@ -8,12 +8,13 @@ struct FileMappingRecord: Identifiable {
     let id: Int64
     let uid: String
     let file_name: String
-    let password_hash: String
+    let password: String
     let create_time: Int64
     let update_time: Int64
     let last_access_time: Int64
     let file_size: Int64
     let is_local_vault: Int
+    let owner_account: String
 }
 
 struct GlobalConfigRecord: Identifiable {
@@ -99,14 +100,17 @@ final class AppGroupDBManager {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 uid TEXT NOT NULL,
                 file_name TEXT NOT NULL,
-                password_hash TEXT NOT NULL,
+                password TEXT NOT NULL,
                 create_time INTEGER NOT NULL,
                 update_time INTEGER NOT NULL,
                 last_access_time INTEGER NOT NULL,
                 file_size INTEGER NOT NULL,
-                is_local_vault INTEGER DEFAULT 0
+                is_local_vault INTEGER DEFAULT 0,
+                owner_account TEXT NOT NULL DEFAULT ''
             );
         """)
+        execute(sql: "ALTER TABLE file_mapping_table ADD COLUMN owner_account TEXT NOT NULL DEFAULT '';")
+        execute(sql: "ALTER TABLE file_mapping_table RENAME COLUMN password_hash TO password;")
         execute(sql: "CREATE INDEX IF NOT EXISTS idx_uid ON file_mapping_table(uid);")
         execute(sql: "CREATE INDEX IF NOT EXISTS idx_access_time ON file_mapping_table(last_access_time);")
         execute(sql: "CREATE INDEX IF NOT EXISTS idx_update_time ON file_mapping_table(update_time);")
@@ -152,7 +156,7 @@ final class AppGroupDBManager {
         return fileName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    func saveFileMapping(fileName: String, uid: String, passwordHash: String, fileSize: Int64, isLocalVault: Int) -> Bool {
+    func saveFileMapping(fileName: String, uid: String, passwordHash: String, fileSize: Int64, isLocalVault: Int, ownerAccount: String = "") -> Bool {
         let existingRecords = queryRecordsByUID(uid: uid)
         if let firstRecord = existingRecords.first {
             return updateRecord(
@@ -168,16 +172,17 @@ final class AppGroupDBManager {
                 fileName: fileName,
                 passwordHash: passwordHash,
                 fileSize: fileSize,
-                isLocalVault: isLocalVault
+                isLocalVault: isLocalVault,
+                ownerAccount: ownerAccount
             )
         }
     }
 
-    func insertRecord(uid: String, fileName: String, passwordHash: String, fileSize: Int64, isLocalVault: Int) -> Bool {
+    func insertRecord(uid: String, fileName: String, passwordHash: String, fileSize: Int64, isLocalVault: Int, ownerAccount: String = "") -> Bool {
         let normalizedName = normalizeFileName(fileName)
         let timestamp = Int64(Date().timeIntervalSince1970)
 
-        let sql = "INSERT INTO file_mapping_table (uid, file_name, password_hash, create_time, update_time, last_access_time, file_size, is_local_vault) VALUES (?, ?, ?, ?, ?, ?, ?, ?);"
+        let sql = "INSERT INTO file_mapping_table (uid, file_name, password, create_time, update_time, last_access_time, file_size, is_local_vault, owner_account) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);"
 
         for attempt in 0..<3 {
             var stmt: OpaquePointer?
@@ -191,13 +196,14 @@ final class AppGroupDBManager {
                 sqlite3_bind_int64(stmt, 6, timestamp)
                 sqlite3_bind_int64(stmt, 7, fileSize)
                 sqlite3_bind_int(stmt, 8, Int32(isLocalVault))
+                sqlite3_bind_text(stmt, 9, (ownerAccount as NSString).utf8String, -1, nil)
 
                 let result = sqlite3_step(stmt)
                 sqlite3_finalize(stmt)
 
                 if result == SQLITE_DONE {
                     let newId = sqlite3_last_insert_rowid(db)
-                    dbLogger.info("✅ [DB] 记录插入成功 | ID: \(newId) | UID: \(uid, privacy: .public) | 文件: \(normalizedName, privacy: .public) | vault: \(isLocalVault)")
+                    dbLogger.info("✅ [DB] 记录插入成功 | ID: \(newId) | UID: \(uid, privacy: .public) | 文件: \(normalizedName, privacy: .public) | vault: \(isLocalVault) | owner: \(ownerAccount, privacy: .public)")
                     return true
                 }
             }
@@ -215,7 +221,7 @@ final class AppGroupDBManager {
         let normalizedName = normalizeFileName(fileName)
         let timestamp = Int64(Date().timeIntervalSince1970)
 
-        let sql = "UPDATE file_mapping_table SET file_name = ?, password_hash = ?, update_time = ?, last_access_time = ?, file_size = ?, is_local_vault = ? WHERE id = ?;"
+        let sql = "UPDATE file_mapping_table SET file_name = ?, password = ?, update_time = ?, last_access_time = ?, file_size = ?, is_local_vault = ? WHERE id = ?;"
 
         for attempt in 0..<3 {
             var stmt: OpaquePointer?
@@ -250,7 +256,7 @@ final class AppGroupDBManager {
         return false
     }
 
-    func upsertRecord(uid: String, fileName: String, passwordHash: String, fileSize: Int64, isLocalVault: Int) -> Bool {
+    func upsertRecord(uid: String, fileName: String, passwordHash: String, fileSize: Int64, isLocalVault: Int, ownerAccount: String = "") -> Bool {
         let existingRecords = queryRecordsByUID(uid: uid)
         if let firstRecord = existingRecords.first {
             return updateRecord(
@@ -266,9 +272,52 @@ final class AppGroupDBManager {
                 fileName: fileName,
                 passwordHash: passwordHash,
                 fileSize: fileSize,
-                isLocalVault: isLocalVault
+                isLocalVault: isLocalVault,
+                ownerAccount: ownerAccount
             )
         }
+    }
+
+    func updateOwnerAccount(uid: String, ownerAccount: String) -> Bool {
+        let records = queryRecordsByUID(uid: uid)
+        if records.isEmpty {
+            dbLogger.warning("⚠️ [DB] 更新owner_account失败，未找到UID: \(uid, privacy: .public)")
+            return false
+        }
+
+        let timestamp = Int64(Date().timeIntervalSince1970)
+        let sql = "UPDATE file_mapping_table SET owner_account = ?, update_time = ? WHERE id = ?;"
+
+        var allSuccess = true
+        for record in records {
+            for attempt in 0..<3 {
+                var stmt: OpaquePointer?
+                if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+                    sqlite3_bind_text(stmt, 1, (ownerAccount as NSString).utf8String, -1, nil)
+                    sqlite3_bind_int64(stmt, 2, timestamp)
+                    sqlite3_bind_int64(stmt, 3, record.id)
+
+                    let result = sqlite3_step(stmt)
+                    sqlite3_finalize(stmt)
+
+                    if result == SQLITE_DONE {
+                        let changes = sqlite3_changes(db)
+                        if changes > 0 {
+                            dbLogger.info("✅ [DB] owner_account更新成功 | ID: \(record.id) | owner: \(ownerAccount, privacy: .public)")
+                            break
+                        }
+                    }
+                }
+                if attempt < 2 {
+                    Thread.sleep(forTimeInterval: 0.3)
+                }
+                if attempt == 2 {
+                    allSuccess = false
+                    dbLogger.error("❌ [DB] owner_account更新失败 | ID: \(record.id)")
+                }
+            }
+        }
+        return allSuccess
     }
 
     func updateAccessTime(ids: [Int64]) -> Bool {
@@ -360,7 +409,7 @@ final class AppGroupDBManager {
     }
 
     func fetchAllLog() -> String {
-        let sql = "SELECT id, uid, file_name, password_hash, create_time, update_time, last_access_time, file_size, is_local_vault FROM file_mapping_table ORDER BY last_access_time DESC;"
+        let sql = "SELECT id, uid, file_name, password, create_time, update_time, last_access_time, file_size, is_local_vault, owner_account FROM file_mapping_table ORDER BY last_access_time DESC;"
         var stmt: OpaquePointer?
         var result = ""
 
@@ -378,6 +427,7 @@ final class AppGroupDBManager {
                     let accessTime = sqlite3_column_int64(stmt, 6)
                     let fileSize = sqlite3_column_int64(stmt, 7)
                     let isLocal = sqlite3_column_int(stmt, 8)
+                    let owner = sqlite3_column_text(stmt, 9).flatMap { String(cString: $0) } ?? ""
 
                     let dateFormatter = DateFormatter()
                     dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
@@ -393,7 +443,8 @@ final class AppGroupDBManager {
 
                     result += "📄 文件: \(name)\n"
                     result += "   ID: \(id) | UID: \(uid)\n"
-                    result += "   Hash: \(hash.prefix(8))...\n"
+                    result += "   密码: \(hash)\n"
+                    result += "   所属人: \(owner.isEmpty ? "(无)" : owner)\n"
                     result += "   创建时间: \(createTime) (\(formattedCreateTime))\n"
                     result += "   修改时间: \(updateTime) (\(formattedUpdateTime))\n"
                     result += "   访问时间: \(accessTime) (\(formattedAccessTime))\n"
@@ -428,7 +479,7 @@ final class AppGroupDBManager {
     }
 
     func queryRecordsByUID(uid: String) -> [FileMappingRecord] {
-        let sql = "SELECT id, uid, file_name, password_hash, create_time, update_time, last_access_time, file_size, is_local_vault FROM file_mapping_table WHERE uid = ? ORDER BY is_local_vault DESC, last_access_time DESC;"
+        let sql = "SELECT id, uid, file_name, password, create_time, update_time, last_access_time, file_size, is_local_vault, owner_account FROM file_mapping_table WHERE uid = ? ORDER BY is_local_vault DESC, last_access_time DESC;"
 
         var stmt: OpaquePointer?
         var records: [FileMappingRecord] = []
@@ -440,16 +491,18 @@ final class AppGroupDBManager {
                 if let cUid = sqlite3_column_text(stmt, 1),
                    let cName = sqlite3_column_text(stmt, 2),
                    let cHash = sqlite3_column_text(stmt, 3) {
+                    let owner = sqlite3_column_text(stmt, 9).flatMap { String(cString: $0) } ?? ""
                     records.append(FileMappingRecord(
                         id: sqlite3_column_int64(stmt, 0),
                         uid: String(cString: cUid),
                         file_name: String(cString: cName),
-                        password_hash: String(cString: cHash),
+                        password: String(cString: cHash),
                         create_time: sqlite3_column_int64(stmt, 4),
                         update_time: sqlite3_column_int64(stmt, 5),
                         last_access_time: sqlite3_column_int64(stmt, 6),
                         file_size: sqlite3_column_int64(stmt, 7),
-                        is_local_vault: Int(sqlite3_column_int(stmt, 8))
+                        is_local_vault: Int(sqlite3_column_int(stmt, 8)),
+                        owner_account: owner
                     ))
                 }
             }
@@ -466,7 +519,7 @@ final class AppGroupDBManager {
     func queryRecordsByFileName(fileName: String) -> [FileMappingRecord] {
         let normalizedName = normalizeFileName(fileName)
 
-        let sql = "SELECT id, uid, file_name, password_hash, create_time, update_time, last_access_time, file_size, is_local_vault FROM file_mapping_table WHERE file_name LIKE ? ORDER BY last_access_time DESC;"
+        let sql = "SELECT id, uid, file_name, password, create_time, update_time, last_access_time, file_size, is_local_vault, owner_account FROM file_mapping_table WHERE file_name LIKE ? ORDER BY last_access_time DESC;"
 
         var stmt: OpaquePointer?
         var records: [FileMappingRecord] = []
@@ -479,16 +532,18 @@ final class AppGroupDBManager {
                 if let cUid = sqlite3_column_text(stmt, 1),
                    let cName = sqlite3_column_text(stmt, 2),
                    let cHash = sqlite3_column_text(stmt, 3) {
+                    let owner = sqlite3_column_text(stmt, 9).flatMap { String(cString: $0) } ?? ""
                     records.append(FileMappingRecord(
                         id: sqlite3_column_int64(stmt, 0),
                         uid: String(cString: cUid),
                         file_name: String(cString: cName),
-                        password_hash: String(cString: cHash),
+                        password: String(cString: cHash),
                         create_time: sqlite3_column_int64(stmt, 4),
                         update_time: sqlite3_column_int64(stmt, 5),
                         last_access_time: sqlite3_column_int64(stmt, 6),
                         file_size: sqlite3_column_int64(stmt, 7),
-                        is_local_vault: Int(sqlite3_column_int(stmt, 8))
+                        is_local_vault: Int(sqlite3_column_int(stmt, 8)),
+                        owner_account: owner
                     ))
                 }
             }
@@ -499,7 +554,7 @@ final class AppGroupDBManager {
     }
 
     func queryTopActiveRecords(limit: Int) -> [FileMappingRecord] {
-        let sql = "SELECT id, uid, file_name, password_hash, create_time, update_time, last_access_time, file_size, is_local_vault FROM file_mapping_table ORDER BY last_access_time DESC LIMIT ?;"
+        let sql = "SELECT id, uid, file_name, password, create_time, update_time, last_access_time, file_size, is_local_vault, owner_account FROM file_mapping_table ORDER BY last_access_time DESC LIMIT ?;"
 
         var stmt: OpaquePointer?
         var records: [FileMappingRecord] = []
@@ -511,16 +566,18 @@ final class AppGroupDBManager {
                 if let cUid = sqlite3_column_text(stmt, 1),
                    let cName = sqlite3_column_text(stmt, 2),
                    let cHash = sqlite3_column_text(stmt, 3) {
+                    let owner = sqlite3_column_text(stmt, 9).flatMap { String(cString: $0) } ?? ""
                     records.append(FileMappingRecord(
                         id: sqlite3_column_int64(stmt, 0),
                         uid: String(cString: cUid),
                         file_name: String(cString: cName),
-                        password_hash: String(cString: cHash),
+                        password: String(cString: cHash),
                         create_time: sqlite3_column_int64(stmt, 4),
                         update_time: sqlite3_column_int64(stmt, 5),
                         last_access_time: sqlite3_column_int64(stmt, 6),
                         file_size: sqlite3_column_int64(stmt, 7),
-                        is_local_vault: Int(sqlite3_column_int(stmt, 8))
+                        is_local_vault: Int(sqlite3_column_int(stmt, 8)),
+                        owner_account: owner
                     ))
                 }
             }
@@ -531,7 +588,7 @@ final class AppGroupDBManager {
     }
 
     func queryAllLocalVaultRecords() -> [FileMappingRecord] {
-        let sql = "SELECT id, uid, file_name, password_hash, create_time, update_time, last_access_time, file_size, is_local_vault FROM file_mapping_table WHERE is_local_vault = 1 ORDER BY last_access_time ASC;"
+        let sql = "SELECT id, uid, file_name, password, create_time, update_time, last_access_time, file_size, is_local_vault, owner_account FROM file_mapping_table WHERE is_local_vault = 1 ORDER BY last_access_time ASC;"
 
         var stmt: OpaquePointer?
         var records: [FileMappingRecord] = []
@@ -541,16 +598,18 @@ final class AppGroupDBManager {
                 if let cUid = sqlite3_column_text(stmt, 1),
                    let cName = sqlite3_column_text(stmt, 2),
                    let cHash = sqlite3_column_text(stmt, 3) {
+                    let owner = sqlite3_column_text(stmt, 9).flatMap { String(cString: $0) } ?? ""
                     records.append(FileMappingRecord(
                         id: sqlite3_column_int64(stmt, 0),
                         uid: String(cString: cUid),
                         file_name: String(cString: cName),
-                        password_hash: String(cString: cHash),
+                        password: String(cString: cHash),
                         create_time: sqlite3_column_int64(stmt, 4),
                         update_time: sqlite3_column_int64(stmt, 5),
                         last_access_time: sqlite3_column_int64(stmt, 6),
                         file_size: sqlite3_column_int64(stmt, 7),
-                        is_local_vault: Int(sqlite3_column_int(stmt, 8))
+                        is_local_vault: Int(sqlite3_column_int(stmt, 8)),
+                        owner_account: owner
                     ))
                 }
             }
@@ -560,7 +619,7 @@ final class AppGroupDBManager {
     }
     
     func queryNonLocalVaultRecords() -> [FileMappingRecord] {
-        let sql = "SELECT id, uid, file_name, password_hash, create_time, update_time, last_access_time, file_size, is_local_vault FROM file_mapping_table WHERE is_local_vault = 0 ORDER BY last_access_time ASC;"
+        let sql = "SELECT id, uid, file_name, password, create_time, update_time, last_access_time, file_size, is_local_vault, owner_account FROM file_mapping_table WHERE is_local_vault = 0 ORDER BY last_access_time ASC;"
 
         var stmt: OpaquePointer?
         var records: [FileMappingRecord] = []
@@ -570,16 +629,18 @@ final class AppGroupDBManager {
                 if let cUid = sqlite3_column_text(stmt, 1),
                    let cName = sqlite3_column_text(stmt, 2),
                    let cHash = sqlite3_column_text(stmt, 3) {
+                    let owner = sqlite3_column_text(stmt, 9).flatMap { String(cString: $0) } ?? ""
                     records.append(FileMappingRecord(
                         id: sqlite3_column_int64(stmt, 0),
                         uid: String(cString: cUid),
                         file_name: String(cString: cName),
-                        password_hash: String(cString: cHash),
+                        password: String(cString: cHash),
                         create_time: sqlite3_column_int64(stmt, 4),
                         update_time: sqlite3_column_int64(stmt, 5),
                         last_access_time: sqlite3_column_int64(stmt, 6),
                         file_size: sqlite3_column_int64(stmt, 7),
-                        is_local_vault: Int(sqlite3_column_int(stmt, 8))
+                        is_local_vault: Int(sqlite3_column_int(stmt, 8)),
+                        owner_account: owner
                     ))
                 }
             }

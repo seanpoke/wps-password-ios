@@ -60,14 +60,17 @@ struct PasswordManagerApp: App {
     }
     
     private func performLogout() {
-        APIService.shared.logout()
-        
-        DispatchQueue.main.async {
+        APIService.shared.logout { result in
+            switch result {
+            case .success:
+                appLogger.info("✅ [App] 注销完成，跳转到登录页面")
+            case .failure(let error):
+                appLogger.error("❌ [App] 远程登出失败，本地token已清空: \(error.localizedDescription)")
+            }
+
             self.isCheckingToken = false
             self.showLogin = true
         }
-        
-        appLogger.info("✅ [App] 已跳转到登录页面")
     }
     
     private func handleScenePhaseChange(_ phase: ScenePhase) {

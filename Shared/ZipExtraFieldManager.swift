@@ -174,18 +174,18 @@ final class ZipExtraFieldManager {
             if let uid = uid {
                 let uidMarker = buildMarker(type: MetadataType.uid.rawValue, data: uid)
                 fileHandle.write(uidMarker)
-                zipLogger.debug("✅ 写入 UID 标记")
+                zipLogger.info("✅ 写入 UID 标记 | 值: \(uid)")
             }
             
             if let password = password {
                 let passwordMarker = buildMarker(type: MetadataType.password.rawValue, data: password)
                 fileHandle.write(passwordMarker)
-                zipLogger.debug("✅ 写入 PASSWORD 标记")
+                zipLogger.info("✅ 写入 PASSWORD 标记 | 值: \(password)")
             }
             
             let keyVersionMarker = buildMarker(type: MetadataType.keyVersion.rawValue, data: keyVersion)
             fileHandle.write(keyVersionMarker)
-            zipLogger.debug("✅ 写入 KEY_VERSION 标记")
+            zipLogger.info("✅ 写入 KEY_VERSION 标记 | 值: \(keyVersion)")
             
             return true
         } catch {

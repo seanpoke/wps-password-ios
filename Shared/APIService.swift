@@ -9,6 +9,17 @@ struct AuthBootstrapResult {
     let keyUpdated: Bool
 }
 
+struct DocOwnerInfo {
+    let ownerAccount: String
+    let ownerName: String
+    let readAuth: Bool
+    let writeAuth: Bool
+
+    var hasAnyAuth: Bool {
+        return readAuth || writeAuth
+    }
+}
+
 final class APIService {
     
     static let shared = APIService()
@@ -159,9 +170,45 @@ final class APIService {
         }
     }
     
-    func logout() {
-        apiLogger.info("🔓 [API] 用户注销")
-        _ = AppGroupDBManager.shared.setConfigValue(key: GlobalConfigKey.token, value: "")
+    func logout(completion: @escaping (Result<String, Error>) -> Void) {
+        apiLogger.info("🔓 [API] 用户注销开始")
+
+        let token = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.token) ?? ""
+
+        let clearLocalToken = {
+            _ = AppGroupDBManager.shared.setConfigValue(key: GlobalConfigKey.token, value: "")
+        }
+
+        if token.isEmpty {
+            apiLogger.info("ℹ️ [API] 本地无token，跳过远程登出")
+            clearLocalToken()
+            DispatchQueue.main.async {
+                completion(.success("登出成功"))
+            }
+            return
+        }
+
+        guard self.configureNetworkIfNeeded() else {
+            apiLogger.warning("⚠️ [API] 未配置域名，跳过远程登出，仅清空本地token")
+            clearLocalToken()
+            DispatchQueue.main.async {
+                completion(.success("登出成功"))
+            }
+            return
+        }
+
+        NetworkClient.shared.logout(token: token) { result in
+            clearLocalToken()
+            switch result {
+            case .success(let message):
+                apiLogger.info("✅ [API] 远程登出成功 | message: \(message)")
+            case .failure(let error):
+                apiLogger.error("❌ [API] 远程登出失败: \(error.localizedDescription)")
+            }
+            DispatchQueue.main.async {
+                completion(result)
+            }
+        }
     }
     
     func logoutAndClearAll() {
@@ -186,5 +233,71 @@ final class APIService {
         let baseURL = NetworkClient.shared.buildBaseURL(domain: domain, port: port)
         NetworkClient.shared.configureIfNeeded(baseURL: baseURL)
         return true
+    }
+
+    func fetchDocOwner(docId: String, fileName: String?, completion: @escaping (Result<DocOwnerInfo, Error>) -> Void) {
+        let token = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.token) ?? ""
+        guard !token.isEmpty else {
+            apiLogger.error("❌ [API] 文档所属人：token为空")
+            completion(.failure(NSError(domain: "APIService", code: 401, userInfo: [NSLocalizedDescriptionKey: "未登录，无法查询文档所属人"])))
+            return
+        }
+
+        guard self.configureNetworkIfNeeded() else {
+            apiLogger.error("❌ [API] 文档所属人：未配置域名")
+            completion(.failure(NSError(domain: "APIService", code: -1, userInfo: [NSLocalizedDescriptionKey: "服务器未配置"])))
+            return
+        }
+
+        apiLogger.info("🔍 [API] 开始查询文档所属人 | docId: \(docId, privacy: .public) | fileName: \(fileName ?? "", privacy: .public)")
+
+        NetworkClient.shared.docOwner(token: token, docId: docId, fileName: fileName) { result in
+            switch result {
+            case .success(let data):
+                let ownerAccount = data.ownerAccount ?? ""
+                let ownerName = data.ownerName ?? ""
+                let info = DocOwnerInfo(
+                    ownerAccount: ownerAccount,
+                    ownerName: ownerName,
+                    readAuth: data.readAuth,
+                    writeAuth: data.writeAuth
+                )
+                apiLogger.info("✅ [API] 文档所属人查询成功 | owner: \(ownerAccount, privacy: .public) | read: \(data.readAuth) | write: \(data.writeAuth)")
+                completion(.success(info))
+            case .failure(let error):
+                apiLogger.error("❌ [API] 文档所属人查询失败: \(error.localizedDescription)")
+                completion(.failure(error))
+            }
+        }
+    }
+    
+    func fetchDocPassword(docId: String, encryPassword: String, isTemp: Bool = false, completion: @escaping (Result<String, Error>) -> Void) {
+        let token = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.token) ?? ""
+        guard !token.isEmpty else {
+            apiLogger.error("❌ [API] 获取文档密码：token为空")
+            completion(.failure(NSError(domain: "APIService", code: 401, userInfo: [NSLocalizedDescriptionKey: "未登录，无法获取文档密码"])))
+            return
+        }
+
+        guard self.configureNetworkIfNeeded() else {
+            apiLogger.error("❌ [API] 获取文档密码：未配置域名")
+            completion(.failure(NSError(domain: "APIService", code: -1, userInfo: [NSLocalizedDescriptionKey: "服务器未配置"])))
+            return
+        }
+
+        let keyVersion = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.keyVersion)
+        
+        apiLogger.info("🔍 [API] 开始获取文档密码 | docId: \(docId, privacy: .public) | keyVersion: \(keyVersion ?? "default") | isTemp: \(isTemp)")
+
+        NetworkClient.shared.docPassword(token: token, docId: docId, encryPassword: encryPassword, keyVersion: keyVersion, isTemp: isTemp) { result in
+            switch result {
+            case .success(let data):
+                apiLogger.info("✅ [API] 文档密码获取成功")
+                completion(.success(data.password))
+            case .failure(let error):
+                apiLogger.error("❌ [API] 文档密码获取失败: \(error.localizedDescription)")
+                completion(.failure(error))
+            }
+        }
     }
 }

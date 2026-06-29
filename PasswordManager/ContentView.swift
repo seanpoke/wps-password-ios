@@ -428,75 +428,123 @@ struct ContentView: View {
             return
         }
         
-        DispatchQueue.global().async {
-            let password = ZipExtraFieldManager.shared.readPassword(from: fileURL)
-            
-            DispatchQueue.main.async {
-                if let password = password {
-                    UIPasteboard.general.string = password
-                    appLogger.info("🔑 密码已复制到剪贴板")
-                    
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 30) {
-                        if UIPasteboard.general.string == password {
+        let currentAccount = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.account) ?? ""
+        let isOwner = !record.owner_account.isEmpty && !currentAccount.isEmpty && record.owner_account == currentAccount
+        
+        if isOwner {
+            appLogger.info("👤 当前用户为文档所属人，获取明文密码")
+            fetchAndCopyPassword(docId: record.uid, encryPassword: record.password) {
+                self.presentFile(fileURL: fileURL, record: record, usePreview: usePreview)
+            }
+        } else {
+            appLogger.info("🔍 当前用户非文档所属人，调用接口校验权限 | owner: \(record.owner_account, privacy: .public) | current: \(currentAccount, privacy: .public)")
+            APIService.shared.fetchDocOwner(docId: record.uid, fileName: record.file_name) { result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success(let info):
+                        if info.hasAnyAuth {
+                            appLogger.info("✅ 权限校验通过，获取明文密码 | read: \(info.readAuth) | write: \(info.writeAuth)")
+                            self.fetchAndCopyPassword(docId: record.uid, encryPassword: record.password) {
+                                self.presentFile(fileURL: fileURL, record: record, usePreview: usePreview)
+                            }
+                        } else {
+                            appLogger.warning("⚠️ 无读/写权限，不复制密码并清空剪贴板")
                             UIPasteboard.general.string = nil
-                            appLogger.info("🔐 剪贴板已清理")
+                            self.showToast(message: "无文档访问权限")
+                            self.presentFile(fileURL: fileURL, record: record, usePreview: usePreview)
                         }
+                    case .failure(let error):
+                        appLogger.error("❌ 权限校验失败: \(error.localizedDescription)")
+                        UIPasteboard.general.string = nil
+                        self.showToast(message: "权限校验失败")
+                        self.presentFile(fileURL: fileURL, record: record, usePreview: usePreview)
                     }
-                    
-                    self.showToast(message: "密码已复制到剪贴板")
-                }
-                
-                guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                      let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first,
-                      var topVC = window.rootViewController else {
-                    return
-                }
-                
-                while let presented = topVC.presentedViewController {
-                    topVC = presented
-                }
-                
-                _ = topVC.view
-                
-                let tempDir = FileManager.default.temporaryDirectory
-                let tempFileURL = tempDir.appendingPathComponent(record.file_name)
-                
-                do {
-                    if FileManager.default.fileExists(atPath: tempFileURL.path) {
-                        try FileManager.default.removeItem(at: tempFileURL)
-                    }
-                    try FileManager.default.copyItem(at: fileURL, to: tempFileURL)
-                    appLogger.info("📤 文件已复制到临时目录: \(tempFileURL.path)")
-                    
-                    if usePreview {
-                        appLogger.info("🚀 使用文档交互管理器直接预览文件")
-                        DispatchQueue.global().async {
-                            AppGroupDBManager.shared.updateAccessTime(uid: record.uid)
-                            appLogger.info("📅 已更新文件访问时间: \(record.file_name)")
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            self.docInteractionManager.presentSystemPreview(
-                                url: tempFileURL,
-                                uid: record.uid,
-                                fileName: record.file_name,
-                                presentingViewController: topVC
-                            )
-                        }
-                    } else {
-                        appLogger.info("🚀 使用文档交互管理器打开文件")
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            self.docInteractionManager.openFile(
-                                url: tempFileURL,
-                                uid: record.uid,
-                                fileName: record.file_name,
-                                presentingViewController: topVC
-                            )
-                        }
-                    }
-                } catch {
-                    appLogger.error("❌ 复制文件失败: \(error)")
                 }
             }
+        }
+    }
+    
+    private func fetchAndCopyPassword(docId: String, encryPassword: String, completion: @escaping () -> Void) {
+        APIService.shared.fetchDocPassword(docId: docId, encryPassword: encryPassword, isTemp: false) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let plainPassword):
+                    self.copyPasswordToClipboard(password: plainPassword)
+                case .failure(let error):
+                    appLogger.error("❌ 获取明文密码失败: \(error.localizedDescription)")
+                    UIPasteboard.general.string = nil
+                    self.showToast(message: "获取密码失败")
+                }
+                completion()
+            }
+        }
+    }
+    
+    private func copyPasswordToClipboard(password: String) {
+        guard !password.isEmpty else { return }
+        UIPasteboard.general.string = password
+        appLogger.info("🔑 密码已复制到剪贴板")
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) {
+            if UIPasteboard.general.string == password {
+                UIPasteboard.general.string = nil
+                appLogger.info("🔐 剪贴板已清理")
+            }
+        }
+        
+        self.showToast(message: "密码已复制到剪贴板")
+    }
+    
+    private func presentFile(fileURL: URL, record: FileMappingRecord, usePreview: Bool) {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first,
+              var topVC = window.rootViewController else {
+            return
+        }
+        
+        while let presented = topVC.presentedViewController {
+            topVC = presented
+        }
+        
+        _ = topVC.view
+        
+        let tempDir = FileManager.default.temporaryDirectory
+        let tempFileURL = tempDir.appendingPathComponent(record.file_name)
+        
+        do {
+            if FileManager.default.fileExists(atPath: tempFileURL.path) {
+                try FileManager.default.removeItem(at: tempFileURL)
+            }
+            try FileManager.default.copyItem(at: fileURL, to: tempFileURL)
+            appLogger.info("📤 文件已复制到临时目录: \(tempFileURL.path)")
+            
+            if usePreview {
+                appLogger.info("🚀 使用文档交互管理器直接预览文件")
+                DispatchQueue.global().async {
+                    AppGroupDBManager.shared.updateAccessTime(uid: record.uid)
+                    appLogger.info("📅 已更新文件访问时间: \(record.file_name)")
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.docInteractionManager.presentSystemPreview(
+                        url: tempFileURL,
+                        uid: record.uid,
+                        fileName: record.file_name,
+                        presentingViewController: topVC
+                    )
+                }
+            } else {
+                appLogger.info("🚀 使用文档交互管理器打开文件")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.docInteractionManager.openFile(
+                        url: tempFileURL,
+                        uid: record.uid,
+                        fileName: record.file_name,
+                        presentingViewController: topVC
+                    )
+                }
+            }
+        } catch {
+            appLogger.error("❌ 复制文件失败: \(error)")
         }
     }
     
@@ -717,7 +765,7 @@ struct AssetDetailView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         
                         InfoRow(label: "uid", value: record.uid)
-                        InfoRow(label: "密码", value: record.password_hash)
+                        InfoRow(label: "密码", value: record.password)
                         InfoRow(label: "密钥版本", value: "1.0")
                     }
                     

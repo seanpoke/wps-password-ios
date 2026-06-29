@@ -14,6 +14,7 @@ enum ActionState: CustomStringConvertible {
     case blueCanvasA
     case blueCanvasB
     case stateD
+    case actionDeny
     
     var description: String {
         switch self {
@@ -24,6 +25,7 @@ enum ActionState: CustomStringConvertible {
         case .blueCanvasA: return "blueCanvasA"
         case .blueCanvasB: return "blueCanvasB"
         case .stateD: return "stateD"
+        case .actionDeny: return "actionDeny"
         }
     }
 }
@@ -70,7 +72,6 @@ struct ShareExtensionView: View {
     
     @State private var showRenameDialog: Bool = false
     @State private var newFileNameInput: String = ""
-    @State private var isSaveAsNewMode: Bool = false
     @State private var fileExtension: String = ""
     
     @State private var previousState: ActionState = .yellowCanvas
@@ -78,6 +79,7 @@ struct ShareExtensionView: View {
     @State private var showPasswordInputDialog: Bool = false
     @State private var pendingAction: PendingAction = .none
     
+    @State private var ownerAccount: String = ""
     @State private var loginAccount = ""
     @State private var loginPassword = ""
     @State private var loginDomain = ""
@@ -122,6 +124,9 @@ struct ShareExtensionView: View {
                     .background(Color.blue)
             case .stateD:
                 stateDView
+                    .background(Color.gray)
+            case .actionDeny:
+                denyCanvasView
                     .background(Color.gray)
             }
         }
@@ -620,6 +625,59 @@ struct ShareExtensionView: View {
         }
     }
     
+    private var denyCanvasView: some View {
+        VStack(spacing: 32) {
+            Spacer()
+            
+            Image(systemName: "lock.shield")
+                .font(.system(size: 80))
+                .foregroundColor(.white)
+                .shadow(radius: 10)
+            
+            VStack(spacing: 12) {
+                Text("无法访问权限")
+                    .font(.title)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                
+                Text("您没有该文档的访问权限")
+                    .font(.headline)
+                    .foregroundColor(.white.opacity(0.9))
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Color.black.opacity(0.2))
+                    .cornerRadius(12)
+            }
+            
+            VStack(spacing: 8) {
+                Text("检测到: \(detectedFileName)")
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.8))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 20)
+                
+                if !ownerAccount.isEmpty {
+                    Text("所属人: \(ownerAccount)")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.8))
+                }
+            }
+            
+            Button(action: cancelAction) {
+                Text("关闭")
+                    .font(.headline)
+                    .foregroundColor(.gray)
+                    .padding()
+                    .frame(maxWidth: 280)
+                    .background(Color.white)
+                    .cornerRadius(16)
+                    .shadow(radius: 8)
+            }
+            
+            Spacer()
+        }
+    }
+    
     private var renameDialogView: some View {
         ZStack {
             Color.black.opacity(0.5)
@@ -632,18 +690,16 @@ struct ShareExtensionView: View {
                 Spacer()
                 
                 VStack(spacing: 20) {
-                    if !isSaveAsNewMode {
-                        Image(systemName: "alert.circle")
-                            .font(.system(size: 60))
-                            .foregroundColor(.orange)
-                    }
+                    Image(systemName: "file.badge.plus")
+                        .font(.system(size: 60))
+                        .foregroundColor(.blue)
                     
-                    Text(isSaveAsNewMode ? "另存为新文件" : "发现重名文件")
+                    Text("文件另存为")
                         .font(.title)
                         .fontWeight(.bold)
                         .foregroundColor(.white)
                     
-                    Text(isSaveAsNewMode ? "请输入新文件的名称" : "保险箱中已存在同名文件，请输入新名称")
+                    Text("请输入新文件的名称")
                         .font(.body)
                         .foregroundColor(.white.opacity(0.8))
                         .multilineTextAlignment(.center)
@@ -676,7 +732,7 @@ struct ShareExtensionView: View {
                         Button(action: confirmRename) {
                             Text("确定")
                                 .font(.headline)
-                                .foregroundColor(isSaveAsNewMode ? .blue : .orange)
+                                .foregroundColor(.blue)
                                 .padding()
                                 .frame(maxWidth: .infinity)
                                 .background(Color.white)
@@ -1086,26 +1142,79 @@ struct ShareExtensionView: View {
         }
     }
     
+    private func fetchPlainPassword(uid: String, encryPassword: String, completion: @escaping (String?) -> Void) {
+        APIService.shared.fetchDocPassword(docId: uid, encryPassword: encryPassword, isTemp: false) { result in
+            switch result {
+            case .success(let password):
+                shareExtensionLogger.info("✅ [获取明文密码] 成功")
+                completion(password)
+            case .failure(let error):
+                shareExtensionLogger.error("❌ [获取明文密码] 失败: \(error.localizedDescription)")
+                completion(nil)
+            }
+        }
+    }
+    
     private func enterPath1(tempURL: URL, fileName: String) async {
         if let uid = ZipExtraFieldManager.shared.readUid(from: tempURL) {
             shareExtensionLogger.info("🔑 [通路1] 提取到UID: \(uid)")
             
             matchedUID = uid
             
-            if let password = ZipExtraFieldManager.shared.readPassword(from: tempURL) {
-                shareExtensionLogger.info("✅ [通路1] 从元数据提取到密码: \(password.prefix(8))...")
-                capturedPassword = password
-                hasPasswordInMetadata = true
+            let encryPassword = ZipExtraFieldManager.shared.readPassword(from: tempURL)
+            if let encryPassword = encryPassword {
+                shareExtensionLogger.info("✅ [通路1] 从元数据提取到加密密码")
             } else {
                 shareExtensionLogger.warning("⚠️ [通路1] 元数据中无密码")
-                capturedPassword = ""
-                hasPasswordInMetadata = false
             }
             
-            actionState = .greenCanvas
+            await queryOwnerAndRouteForGreenCanvas(uid: uid, fileName: fileName, encryPassword: encryPassword)
         } else {
             shareExtensionLogger.error("❌ [通路1] 无法提取UID，降级到野生文件")
             await enterPath3(tempURL: tempURL, fileName: fileName)
+        }
+    }
+    
+    private func queryOwnerAndRouteForGreenCanvas(uid: String, fileName: String, encryPassword: String?) async {
+        shareExtensionLogger.info("🔍 [通路1] ===== 开始调用文档所属人接口 =====")
+        shareExtensionLogger.info("🔍 [通路1] docId(UID): \(uid, privacy: .public) | fileName: \(fileName, privacy: .public)")
+        
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            APIService.shared.fetchDocOwner(docId: uid, fileName: fileName) { result in
+                Task { @MainActor in
+                    switch result {
+                    case .success(let info):
+                        shareExtensionLogger.info("✅ [通路1] 所属人接口返回成功 | owner: \(info.ownerAccount, privacy: .public) | read: \(info.readAuth) | write: \(info.writeAuth)")
+                        self.ownerAccount = info.ownerAccount
+                        if info.hasAnyAuth {
+                            shareExtensionLogger.info("✅ [通路1] 拥有读/写权限，开始解密密码")
+                            if let encryPassword = encryPassword {
+                                self.fetchPlainPassword(uid: uid, encryPassword: encryPassword) { plainPassword in
+                                    self.capturedPassword = plainPassword ?? ""
+                                    self.hasPasswordInMetadata = plainPassword != nil
+                                    if plainPassword == nil {
+                                        shareExtensionLogger.warning("⚠️ [通路1] 获取明文密码失败")
+                                    }
+                                    self.actionState = .greenCanvas
+                                }
+                            } else {
+                                shareExtensionLogger.info("⚠️ [通路1] 无加密密码，直接进入绿色画布")
+                                self.capturedPassword = ""
+                                self.hasPasswordInMetadata = false
+                                self.actionState = .greenCanvas
+                            }
+                        } else {
+                            shareExtensionLogger.warning("⚠️ [通路1] 无任何读/写权限，进入无法访问权限灰色画布")
+                            self.actionState = .actionDeny
+                        }
+                    case .failure(let error):
+                        shareExtensionLogger.error("❌ [通路1] 所属人接口调用失败: \(error.localizedDescription)，降级到绿色画布")
+                        self.ownerAccount = ""
+                        self.actionState = .greenCanvas
+                    }
+                    continuation.resume()
+                }
+            }
         }
     }
     
@@ -1122,9 +1231,16 @@ struct ShareExtensionView: View {
                 matchedUID = uid
                 matchedAssetName = record.file_name
                 matchedIsLocalVault = record.is_local_vault
-                capturedPassword = record.password_hash
-                shareExtensionLogger.info("✅ [通路2] 设置密码: \(capturedPassword.prefix(8))...")
-                actionState = .blueCanvasA
+                
+                if !record.password.isEmpty {
+                    shareExtensionLogger.info("✅ [通路2] 数据库有明文密码，直接使用")
+                    capturedPassword = record.password
+                    actionState = .blueCanvasA
+                } else {
+                    shareExtensionLogger.warning("⚠️ [通路2] 数据库中密码为空")
+                    capturedPassword = ""
+                    actionState = .blueCanvasA
+                }
             } else {
                 shareExtensionLogger.warning("⚠️ [通路2] 数据库无记录，降级到蓝色画布B，保留文件原有UID")
                 matchedUID = uid
@@ -1158,16 +1274,23 @@ struct ShareExtensionView: View {
             shareExtensionLogger.info("📋 [通路4] 获取前\(topRecords.count)条活跃记录")
             
             for (index, record) in topRecords.enumerated() {
-                shareExtensionLogger.info("🔐 [通路4] 尝试密码 \(index+1)/\(topRecords.count): \(record.password_hash.prefix(8))...")
+                shareExtensionLogger.info("🔐 [通路4] 尝试记录 \(index+1)/\(topRecords.count): \(record.file_name)")
                 
-                let verificationResult = await self.verifyPassword(fileURL: tempURL, password: record.password_hash)
+                let plainPassword = await self.fetchPlainPasswordAsync(uid: record.uid, encryPassword: record.password)
                 
-                if verificationResult {
-                    shareExtensionLogger.info("✅ [通路4] 密码撞击成功! 匹配记录: \(record.file_name)")
-                    return (record, record.password_hash)
+                if let plainPassword = plainPassword {
+                    shareExtensionLogger.info("🔐 [通路4] 获取到明文密码，开始验证")
+                    let verificationResult = await self.verifyPassword(fileURL: tempURL, password: plainPassword)
+                    
+                    if verificationResult {
+                        shareExtensionLogger.info("✅ [通路4] 密码撞击成功! 匹配记录: \(record.file_name)")
+                        return (record, plainPassword)
+                    }
+                    
+                    shareExtensionLogger.info("❌ [通路4] 密码撞击失败")
+                } else {
+                    shareExtensionLogger.warning("⚠️ [通路4] 获取明文密码失败，跳过该记录")
                 }
-                
-                shareExtensionLogger.info("❌ [通路4] 密码撞击失败")
             }
             
             shareExtensionLogger.info("❌ [通路4] 所有\(topRecords.count)条密码均撞击失败")
@@ -1188,6 +1311,20 @@ struct ShareExtensionView: View {
         } else {
             shareExtensionLogger.warning("⚠️ [通路4] 所有密码撞击失败，降级到蓝色画布子态B")
             actionState = .blueCanvasB
+        }
+    }
+    
+    private func fetchPlainPasswordAsync(uid: String, encryPassword: String) async -> String? {
+        return await withCheckedContinuation { continuation in
+            APIService.shared.fetchDocPassword(docId: uid, encryPassword: encryPassword, isTemp: false) { result in
+                switch result {
+                case .success(let password):
+                    continuation.resume(returning: password)
+                case .failure(let error):
+                    shareExtensionLogger.error("❌ [获取明文密码] 失败: \(error.localizedDescription)")
+                    continuation.resume(returning: nil)
+                }
+            }
         }
     }
     
@@ -1287,13 +1424,14 @@ struct ShareExtensionView: View {
                 let ids = existingRecords.map { $0.id }
                 _ = AppGroupDBManager.shared.updateAccessTime(ids: ids)
             } else {
-                shareExtensionLogger.info("✅ [通路1] 数据库无同UID记录，插入新记录")
+                shareExtensionLogger.info("✅ [通路1] 数据库无同UID记录，插入新记录 | owner: \(self.ownerAccount, privacy: .public)")
                 _ = AppGroupDBManager.shared.insertRecord(
                     uid: matchedUID,
                     fileName: detectedFileName,
                     passwordHash: capturedPassword,
                     fileSize: fileSize,
-                    isLocalVault: 0
+                    isLocalVault: 0,
+                    ownerAccount: ownerAccount
                 )
             }
         }
@@ -1316,7 +1454,6 @@ struct ShareExtensionView: View {
         
         newFileNameInput = baseName
         fileExtension = ext
-        isSaveAsNewMode = true
         showRenameDialog = true
     }
     
@@ -1430,7 +1567,6 @@ struct ShareExtensionView: View {
         
         newFileNameInput = baseName
         fileExtension = ext
-        isSaveAsNewMode = false
         showRenameDialog = true
     }
     
@@ -1496,8 +1632,25 @@ struct ShareExtensionView: View {
         
         shareExtensionLogger.info("📝 [识别到新文件] 文件名: \(fileName) | UID: \(uid)")
         
+        let keyVersion = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.keyVersion) ?? "default"
+        let publicKey = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.publicKey)
+        
+        var encryptedPassword: String? = nil
+        if !password.isEmpty, let publicKey = publicKey, !publicKey.isEmpty {
+            encryptedPassword = ECIESEncryptor.shared.encrypt(data: password, publicKeyStr: publicKey)
+            if encryptedPassword != nil {
+                shareExtensionLogger.info("✅ [识别到新文件] 密码加密成功")
+            } else {
+                shareExtensionLogger.warning("⚠️ [识别到新文件] 密码加密失败，使用明文")
+                encryptedPassword = password
+            }
+        } else if !password.isEmpty {
+            shareExtensionLogger.warning("⚠️ [识别到新文件] 无公钥，使用明文密码")
+            encryptedPassword = password
+        }
+        
         shareExtensionLogger.info("📝 [识别到新文件] 开始写入 WPPM 标记")
-        let writeSuccess = writeWppmMarkers(tempURL: tempURL, uid: uid, password: password)
+        let writeSuccess = writeWppmMarkers(tempURL: tempURL, uid: uid, encryptedPassword: encryptedPassword, keyVersion: keyVersion)
         shareExtensionLogger.info("📝 [识别到新文件] WPPM 标记写入结果: \(writeSuccess)")
         
         if writeSuccess {
@@ -1506,22 +1659,26 @@ struct ShareExtensionView: View {
             shareExtensionLogger.info("📝 [识别到新文件] 迁移结果: \(moveSuccess)")
             
             if moveSuccess {
-                shareExtensionLogger.info("📝 [识别到新文件] 开始保存数据库记录")
-                let dbSuccess = AppGroupDBManager.shared.saveFileMapping(
-                    fileName: fileName,
-                    uid: uid,
-                    passwordHash: password,
-                    fileSize: fileSize,
-                    isLocalVault: 1
-                )
-                shareExtensionLogger.info("📝 [识别到新文件] 数据库保存结果: \(dbSuccess)")
-                
-                if dbSuccess {
-                    shareExtensionLogger.info("✅ [识别到新文件] 所有步骤成功完成")
-                    completeExtension()
-                } else {
-                    shareExtensionLogger.error("❌ [识别到新文件] 数据库保存失败")
-                    completeExtension(withError: "数据库保存失败")
+                Task { @MainActor in
+                    let owner = await self.queryOwnerForDoc(uid: uid, fileName: fileName)
+                    shareExtensionLogger.info("📝 [识别到新文件] 开始保存数据库记录 | owner: \(owner, privacy: .public)")
+                    let dbSuccess = AppGroupDBManager.shared.saveFileMapping(
+                        fileName: fileName,
+                        uid: uid,
+                        passwordHash: password,
+                        fileSize: fileSize,
+                        isLocalVault: 1,
+                        ownerAccount: owner
+                    )
+                    shareExtensionLogger.info("📝 [识别到新文件] 数据库保存结果: \(dbSuccess)")
+                    
+                    if dbSuccess {
+                        shareExtensionLogger.info("✅ [识别到新文件] 所有步骤成功完成")
+                        completeExtension()
+                    } else {
+                        shareExtensionLogger.error("❌ [识别到新文件] 数据库保存失败")
+                        completeExtension(withError: "数据库保存失败")
+                    }
                 }
             } else {
                 shareExtensionLogger.error("❌ [识别到新文件] 文件迁移失败")
@@ -1533,11 +1690,28 @@ struct ShareExtensionView: View {
         }
     }
     
+    private func queryOwnerForDoc(uid: String, fileName: String) async -> String {
+        shareExtensionLogger.info("🔍 [所属人查询] ===== 根据UID查询文档所属人 =====")
+        shareExtensionLogger.info("🔍 [所属人查询] docId(UID): \(uid, privacy: .public) | fileName: \(fileName, privacy: .public)")
+        
+        return await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+            APIService.shared.fetchDocOwner(docId: uid, fileName: fileName) { result in
+                switch result {
+                case .success(let info):
+                    shareExtensionLogger.info("✅ [所属人查询] 成功 | owner: \(info.ownerAccount, privacy: .public) | read: \(info.readAuth) | write: \(info.writeAuth)")
+                    continuation.resume(returning: info.ownerAccount)
+                case .failure(let error):
+                    shareExtensionLogger.error("❌ [所属人查询] 失败: \(error.localizedDescription)，使用空owner")
+                    continuation.resume(returning: "")
+                }
+            }
+        }
+    }
+    
     private func confirmRename() {
         shareExtensionLogger.info("✅ [确认重命名] ===== confirmRename 开始 =====")
         shareExtensionLogger.info("✅ [确认重命名] 用户输入: newFileNameInput=\(newFileNameInput)")
         shareExtensionLogger.info("✅ [确认重命名] fileExtension=\(fileExtension)")
-        shareExtensionLogger.info("✅ [确认重命名] isSaveAsNewMode=\(isSaveAsNewMode)")
         
         let trimmedName = newFileNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
         shareExtensionLogger.info("✅ [确认重命名] 去空格后: trimmedName=\(trimmedName)")
@@ -1551,7 +1725,6 @@ struct ShareExtensionView: View {
         let fullFileName = "\(trimmedName)\(fileExtension)"
         shareExtensionLogger.info("✅ [确认重命名] 完整文件名: fullFileName=\(fullFileName)")
         
-        // 检查文件是否已存在
         let existsInVault = fileNameExistsInVault(fileName: fullFileName)
         shareExtensionLogger.info("✅ [确认重命名] fileNameExistsInVault 返回: \(existsInVault)")
         
@@ -1565,13 +1738,8 @@ struct ShareExtensionView: View {
         showRenameDialog = false
         verificationError = nil
         
-        if isSaveAsNewMode {
-            shareExtensionLogger.info("✅ [确认重命名] 调用 performSaveAsNew")
-            performSaveAsNew(newFileName: fullFileName, password: isEncryptedFile ? capturedPassword : "")
-        } else {
-            shareExtensionLogger.info("✅ [确认重命名] 调用 performRegisterNewFile")
-            performRegisterNewFile(password: isEncryptedFile ? capturedPassword : "", fileName: fullFileName)
-        }
+        shareExtensionLogger.info("✅ [确认重命名] 调用 performSaveAsNew")
+        performSaveAsNew(newFileName: fullFileName, password: isEncryptedFile ? capturedPassword : "")
     }
     
     private func moveToSafeVaultSync(tempURL: URL, newFileName: String) -> Bool {
@@ -1675,10 +1843,23 @@ struct ShareExtensionView: View {
         }
         
         Task.detached {
-            let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: password)
+            let keyVersion = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.keyVersion) ?? "default"
+            let publicKey = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.publicKey)
+            
+            var encryptedPassword: String? = nil
+            if !password.isEmpty, let publicKey = publicKey, !publicKey.isEmpty {
+                encryptedPassword = ECIESEncryptor.shared.encrypt(data: password, publicKeyStr: publicKey)
+                if encryptedPassword == nil {
+                    encryptedPassword = password
+                }
+            } else if !password.isEmpty {
+                encryptedPassword = password
+            }
+            
+            let success = writeWppmMarkers(tempURL: tempURL, uid: uid, encryptedPassword: encryptedPassword, keyVersion: keyVersion)
             
             if success {
-                let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
+                let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName, allowOverwrite: true)
                 
                 await MainActor.run {
                     if moveSuccess {
@@ -1757,10 +1938,9 @@ struct ShareExtensionView: View {
         
         newFileNameInput = baseName
         fileExtension = ext
-        isSaveAsNewMode = true
         showRenameDialog = true
         
-        shareExtensionLogger.info("➕ [另存为] 显示重命名弹窗，isSaveAsNewMode=\(isSaveAsNewMode)")
+        shareExtensionLogger.info("➕ [另存为] 显示重命名弹窗")
     }
     
     private func confirmSaveAsNew() {
@@ -1844,8 +2024,21 @@ struct ShareExtensionView: View {
         shareExtensionLogger.info("➕ [执行另存为] 新文件名: \(newFileName) | UID: \(uid)")
         
         Task.detached {
+            let keyVersion = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.keyVersion) ?? "default"
+            let publicKey = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.publicKey)
+            
+            var encryptedPassword: String? = nil
+            if !finalPassword.isEmpty, let publicKey = publicKey, !publicKey.isEmpty {
+                encryptedPassword = ECIESEncryptor.shared.encrypt(data: finalPassword, publicKeyStr: publicKey)
+                if encryptedPassword == nil {
+                    encryptedPassword = finalPassword
+                }
+            } else if !finalPassword.isEmpty {
+                encryptedPassword = finalPassword
+            }
+            
             shareExtensionLogger.info("➕ [执行另存为] 开始写入 WPPM 标记")
-            let success = writeWppmMarkers(tempURL: tempURL, uid: uid, password: finalPassword)
+            let success = writeWppmMarkers(tempURL: tempURL, uid: uid, encryptedPassword: encryptedPassword, keyVersion: keyVersion)
             shareExtensionLogger.info("➕ [执行另存为] WPPM 标记写入结果: \(success)")
             
             if success {
@@ -1855,17 +2048,21 @@ struct ShareExtensionView: View {
                 
                 await MainActor.run {
                     if moveSuccess {
-                        // 另存为新文件：直接插入新记录，不触发 update（避免覆盖原文件记录）
-                        let insertSuccess = AppGroupDBManager.shared.insertRecord(
-                            uid: uid,
-                            fileName: newFileName,
-                            passwordHash: capturedPassword,
-                            fileSize: fileSize,
-                            isLocalVault: 1
-                        )
-                        shareExtensionLogger.info("➕ [执行另存为] 数据库插入结果: \(insertSuccess)")
-                        shareExtensionLogger.info("✅ [另存为新文件] 成功")
-                        completeExtension()
+                        Task { @MainActor in
+                            let owner = await self.queryOwnerForDoc(uid: uid, fileName: newFileName)
+                            // 另存为新文件：直接插入新记录，不触发 update（避免覆盖原文件记录）
+                            let insertSuccess = AppGroupDBManager.shared.insertRecord(
+                                uid: uid,
+                                fileName: newFileName,
+                                passwordHash: capturedPassword,
+                                fileSize: fileSize,
+                                isLocalVault: 1,
+                                ownerAccount: owner
+                            )
+                            shareExtensionLogger.info("➕ [执行另存为] 数据库插入结果: \(insertSuccess) | owner: \(owner, privacy: .public)")
+                            shareExtensionLogger.info("✅ [另存为新文件] 成功")
+                            completeExtension()
+                        }
                     } else {
                         completeExtension(withError: "文件迁移失败")
                     }
@@ -1943,10 +2140,23 @@ struct ShareExtensionView: View {
                     case .success(let verified):
                         if verified {
                             Task.detached {
-                                let success = writeWppmMarkers(tempURL: tempURL, uid: targetUid, password: password)
+                                let keyVersion = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.keyVersion) ?? "default"
+                                let publicKey = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.publicKey)
+                                
+                                var encryptedPassword: String? = nil
+                                if !password.isEmpty, let publicKey = publicKey, !publicKey.isEmpty {
+                                    encryptedPassword = ECIESEncryptor.shared.encrypt(data: password, publicKeyStr: publicKey)
+                                    if encryptedPassword == nil {
+                                        encryptedPassword = password
+                                    }
+                                } else if !password.isEmpty {
+                                    encryptedPassword = password
+                                }
+                                
+                                let success = writeWppmMarkers(tempURL: tempURL, uid: targetUid, encryptedPassword: encryptedPassword, keyVersion: keyVersion)
                                 
                                 if success {
-                                    let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
+                                    let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName, allowOverwrite: true)
                                     
                                     await MainActor.run {
                                         if moveSuccess {
@@ -1981,10 +2191,11 @@ struct ShareExtensionView: View {
             }
         } else {
             Task.detached {
-                let success = writeWppmMarkers(tempURL: tempURL, uid: targetUid, password: password)
+                let keyVersion = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.keyVersion) ?? "default"
+                let success = writeWppmMarkers(tempURL: tempURL, uid: targetUid, encryptedPassword: nil, keyVersion: keyVersion)
                 
                 if success {
-                    let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName)
+                    let moveSuccess = await moveToSafeVault(tempURL: tempURL, newFileName: fileName, allowOverwrite: true)
                     
                     await MainActor.run {
                         if moveSuccess {
@@ -2037,19 +2248,20 @@ struct ShareExtensionView: View {
         return UidGenerator.shared.createUid()
     }
     
-    private nonisolated func writeWppmMarkers(tempURL: URL, uid: String, password: String?) -> Bool {
+    private nonisolated func writeWppmMarkers(tempURL: URL, uid: String, encryptedPassword: String?, keyVersion: String) -> Bool {
         return ZipExtraFieldManager.shared.writeMetadata(
             to: tempURL,
             uid: uid,
-            password: password,
-            keyVersion: "default"
+            password: encryptedPassword,
+            keyVersion: keyVersion
         )
     }
     
-    private func moveToSafeVault(tempURL: URL, newFileName: String) async -> Bool {
+    private func moveToSafeVault(tempURL: URL, newFileName: String, allowOverwrite: Bool = false) async -> Bool {
         shareExtensionLogger.info("📦 [迁移] ===== moveToSafeVault 开始 =====")
         shareExtensionLogger.info("📦 [迁移] 源文件路径: \(tempURL.path)")
         shareExtensionLogger.info("📦 [迁移] 目标文件名: \(newFileName)")
+        shareExtensionLogger.info("📦 [迁移] 是否允许覆盖: \(allowOverwrite)")
         
         do {
             guard let containerURL = FileManager.default.containerURL(
@@ -2074,8 +2286,14 @@ struct ShareExtensionView: View {
             shareExtensionLogger.info("📦 [迁移] 目标文件是否已存在: \(fileExists)")
             
             if fileExists {
-                shareExtensionLogger.error("❌ [迁移] 目标文件已存在，拒绝覆盖: \(newFileName)")
-                return false
+                if allowOverwrite {
+                    shareExtensionLogger.info("📦 [迁移] 目标文件已存在，执行覆盖操作")
+                    try FileManager.default.removeItem(at: destURL)
+                    shareExtensionLogger.info("✅ [迁移] 已删除旧文件")
+                } else {
+                    shareExtensionLogger.error("❌ [迁移] 目标文件已存在，拒绝覆盖: \(newFileName)")
+                    return false
+                }
             }
             
             shareExtensionLogger.info("📦 [迁移] 开始文件协调和移动操作")
