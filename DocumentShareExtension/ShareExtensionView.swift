@@ -107,27 +107,35 @@ struct ShareExtensionView: View {
             switch actionState {
             case .identifying:
                 identifyingView
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.gray)
             case .loginCanvas:
                 loginCanvasView
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.gray)
             case .greenCanvas:
                 greenCanvasView
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.green)
             case .yellowCanvas:
                 yellowCanvasView
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.orange)
             case .blueCanvasA:
                 blueCanvasSubAView
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.blue)
             case .blueCanvasB:
                 blueCanvasSubBView
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.blue)
             case .stateD:
                 stateDView
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.gray)
             case .actionDeny:
                 denyCanvasView
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.gray)
             }
         }
@@ -649,7 +657,7 @@ struct ShareExtensionView: View {
                 .shadow(radius: 10)
             
             VStack(spacing: 12) {
-                Text("无法访问权限")
+                Text("无访问权限")
                     .font(.title)
                     .fontWeight(.bold)
                     .foregroundColor(.white)
