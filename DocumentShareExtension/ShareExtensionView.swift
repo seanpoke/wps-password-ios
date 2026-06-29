@@ -69,6 +69,7 @@ struct ShareExtensionView: View {
     
     @State private var assetList: [FileMappingRecord] = []
     @State private var showAssetList: Bool = false
+    @State private var assetSearchText: String = ""
     
     @State private var showRenameDialog: Bool = false
     @State private var newFileNameInput: String = ""
@@ -576,6 +577,13 @@ struct ShareExtensionView: View {
         }
     }
     
+    private var filteredAssetList: [FileMappingRecord] {
+        if assetSearchText.isEmpty {
+            return assetList
+        }
+        return assetList.filter { $0.file_name.localizedCaseInsensitiveContains(assetSearchText) }
+    }
+    
     private var stateDView: some View {
         VStack(spacing: 20) {
             Spacer()
@@ -585,16 +593,22 @@ struct ShareExtensionView: View {
                 .foregroundColor(.white)
                 .shadow(radius: 10)
             
-            Text("选择要覆盖的资产")
+            Text("选择要覆盖的文件")
                 .font(.title)
                 .fontWeight(.bold)
                 .foregroundColor(.white)
             
-            Spacer()
+            TextField("搜索文件名...", text: $assetSearchText)
+                .padding(12)
+                .background(Color.white.opacity(0.15))
+                .cornerRadius(10)
+                .foregroundColor(.white)
+                .accentColor(.white)
+                .padding(.horizontal, 20)
             
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    ForEach(assetList, id: \.id) { record in
+                    ForEach(filteredAssetList, id: \.id) { record in
                         Button(action: { selectAsset(record: record) }) {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(record.file_name)
@@ -1537,7 +1551,7 @@ struct ShareExtensionView: View {
                 switch result {
                 case .success(let verified):
                     if verified {
-                        shareExtensionLogger.info("✅ [关联覆盖] 密码验证通过，显示资产选择列表")
+                        shareExtensionLogger.info("✅ [关联覆盖] 密码验证通过，显示文件选择列表")
                         self.showAssetSelection()
                     } else {
                         shareExtensionLogger.warning("⚠️ [关联覆盖] 密码验证失败")
@@ -2092,6 +2106,7 @@ struct ShareExtensionView: View {
     
     private func showAssetSelection() {
         previousState = actionState
+        assetSearchText = ""
         assetList = AppGroupDBManager.shared.queryAllLocalVaultRecords()
         actionState = .stateD
     }
@@ -2107,7 +2122,7 @@ struct ShareExtensionView: View {
         
         let targetUid = readUidFromVaultFile(fileName: fileName) ?? record.uid
         
-        shareExtensionLogger.info("🎯 [状态D] 选择资产: \(fileName) | UID(数据库): \(record.uid) | UID(文件尾部): \(targetUid)")
+        shareExtensionLogger.info("🎯 [状态D] 选择文件: \(fileName) | UID(数据库): \(record.uid) | UID(文件尾部): \(targetUid)")
         shareExtensionLogger.info("🎯 [状态D] 文件加密状态: \(isEncryptedFile ? "已加密" : "未加密")")
         
         if isEncryptedFile {

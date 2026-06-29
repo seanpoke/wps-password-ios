@@ -596,7 +596,7 @@ final class AppGroupDBManager {
     }
 
     func queryAllLocalVaultRecords() -> [FileMappingRecord] {
-        let sql = "SELECT id, uid, file_name, password, create_time, update_time, last_access_time, file_size, is_local_vault, owner_account FROM file_mapping_table WHERE is_local_vault = 1 ORDER BY last_access_time ASC;"
+        let sql = "SELECT id, uid, file_name, password, create_time, update_time, last_access_time, file_size, is_local_vault, owner_account FROM file_mapping_table WHERE is_local_vault = 1 ORDER BY last_access_time DESC;"
 
         var stmt: OpaquePointer?
         var records: [FileMappingRecord] = []
