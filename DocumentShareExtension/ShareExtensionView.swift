@@ -1638,15 +1638,6 @@ struct ShareExtensionView: View {
         var encryptedPassword: String? = nil
         if !password.isEmpty, let publicKey = publicKey, !publicKey.isEmpty {
             encryptedPassword = ECIESEncryptor.shared.encrypt(data: password, publicKeyStr: publicKey)
-            if encryptedPassword != nil {
-                shareExtensionLogger.info("✅ [识别到新文件] 密码加密成功")
-            } else {
-                shareExtensionLogger.warning("⚠️ [识别到新文件] 密码加密失败，使用明文")
-                encryptedPassword = password
-            }
-        } else if !password.isEmpty {
-            shareExtensionLogger.warning("⚠️ [识别到新文件] 无公钥，使用明文密码")
-            encryptedPassword = password
         }
         
         shareExtensionLogger.info("📝 [识别到新文件] 开始写入 WPPM 标记")
@@ -1849,11 +1840,6 @@ struct ShareExtensionView: View {
             var encryptedPassword: String? = nil
             if !password.isEmpty, let publicKey = publicKey, !publicKey.isEmpty {
                 encryptedPassword = ECIESEncryptor.shared.encrypt(data: password, publicKeyStr: publicKey)
-                if encryptedPassword == nil {
-                    encryptedPassword = password
-                }
-            } else if !password.isEmpty {
-                encryptedPassword = password
             }
             
             let success = writeWppmMarkers(tempURL: tempURL, uid: uid, encryptedPassword: encryptedPassword, keyVersion: keyVersion)
@@ -2030,11 +2016,6 @@ struct ShareExtensionView: View {
             var encryptedPassword: String? = nil
             if !finalPassword.isEmpty, let publicKey = publicKey, !publicKey.isEmpty {
                 encryptedPassword = ECIESEncryptor.shared.encrypt(data: finalPassword, publicKeyStr: publicKey)
-                if encryptedPassword == nil {
-                    encryptedPassword = finalPassword
-                }
-            } else if !finalPassword.isEmpty {
-                encryptedPassword = finalPassword
             }
             
             shareExtensionLogger.info("➕ [执行另存为] 开始写入 WPPM 标记")
@@ -2146,11 +2127,6 @@ struct ShareExtensionView: View {
                                 var encryptedPassword: String? = nil
                                 if !password.isEmpty, let publicKey = publicKey, !publicKey.isEmpty {
                                     encryptedPassword = ECIESEncryptor.shared.encrypt(data: password, publicKeyStr: publicKey)
-                                    if encryptedPassword == nil {
-                                        encryptedPassword = password
-                                    }
-                                } else if !password.isEmpty {
-                                    encryptedPassword = password
                                 }
                                 
                                 let success = writeWppmMarkers(tempURL: tempURL, uid: targetUid, encryptedPassword: encryptedPassword, keyVersion: keyVersion)

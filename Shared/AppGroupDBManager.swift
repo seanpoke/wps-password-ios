@@ -126,12 +126,18 @@ final class AppGroupDBManager {
     }
 
     private func initializeDefaultConfigs() {
+        let defaultValues: [String: String] = [
+            GlobalConfigKey.publicKey: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEuY2/Hz7c7gM0O8P/8VYjDasWhdW4jyS99+Xwyghe+CVFko7KPeamzaOsUffIHQz0VAA8RH9MV1BYyuZAJ7X05Q==",
+            GlobalConfigKey.keyVersion: "default"
+        ]
         for (key, remark) in GlobalConfigKey.allKeys {
-            let sql = "INSERT OR IGNORE INTO global_config_table (key, value, remark) VALUES (?, '', ?);"
+            let defaultValue = defaultValues[key] ?? ""
+            let sql = "INSERT OR IGNORE INTO global_config_table (key, value, remark) VALUES (?, ?, ?);"
             var stmt: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
                 sqlite3_bind_text(stmt, 1, (key as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 2, (remark as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(stmt, 2, (defaultValue as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(stmt, 3, (remark as NSString).utf8String, -1, nil)
                 if sqlite3_step(stmt) != SQLITE_DONE {
                     dbLogger.error("❌ [DB] 默认配置初始化失败 | key: \(key, privacy: .public)")
                 }
