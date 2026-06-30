@@ -343,7 +343,7 @@ struct ShareExtensionView: View {
         VStack(spacing: 40) {
             Spacer()
             
-            Image(systemName: isEncryptedFile ? "key.fill" : "file")
+            Image(systemName: isEncryptedFile ? "key.fill" : "doc")
                 .font(.system(size: 80))
                 .foregroundColor(.white)
                 .shadow(radius: 10)
@@ -499,7 +499,7 @@ struct ShareExtensionView: View {
         VStack(spacing: 40) {
             Spacer()
             
-            Image(systemName: isEncryptedFile ? "lock.fill" : "file")
+            Image(systemName: isEncryptedFile ? "lock.fill" : "doc")
                 .font(.system(size: 80))
                 .foregroundColor(.white)
                 .shadow(radius: 10)

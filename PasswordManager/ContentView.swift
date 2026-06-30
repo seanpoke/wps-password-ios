@@ -792,7 +792,7 @@ struct FileIconView: View {
                     .font(.system(size: 24, weight: .bold))
                     .foregroundColor(iconInfo.fgColor)
             } else {
-                Image(systemName: "file")
+                Image(systemName: "doc")
                     .font(.system(size: 20))
                     .foregroundColor(.gray)
             }
