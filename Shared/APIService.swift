@@ -300,4 +300,60 @@ final class APIService {
             }
         }
     }
+    
+    func fetchDocAuthTree(docId: String, completion: @escaping (Result<[PermissionNodeResponse], Error>) -> Void) {
+        let token = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.token) ?? ""
+        guard !token.isEmpty else {
+            apiLogger.error("❌ [API] 获取权限树：token为空")
+            completion(.failure(NSError(domain: "APIService", code: 401, userInfo: [NSLocalizedDescriptionKey: "未登录，无法获取权限树"])))
+            return
+        }
+
+        guard self.configureNetworkIfNeeded() else {
+            apiLogger.error("❌ [API] 获取权限树：未配置域名")
+            completion(.failure(NSError(domain: "APIService", code: -1, userInfo: [NSLocalizedDescriptionKey: "服务器未配置"])))
+            return
+        }
+
+        apiLogger.info("🔍 [API] 开始获取文档权限树 | docId: \(docId, privacy: .public)")
+
+        NetworkClient.shared.docAuthTree(token: token, docId: docId) { result in
+            switch result {
+            case .success(let data):
+                apiLogger.info("✅ [API] 文档权限树获取成功 | 节点数: \(data.count)")
+                completion(.success(data))
+            case .failure(let error):
+                apiLogger.error("❌ [API] 文档权限树获取失败: \(error.localizedDescription)")
+                completion(.failure(error))
+            }
+        }
+    }
+    
+    func updateDocAuth(docId: String, accountDnList: [String], deptDnList: [String], completion: @escaping (Result<String, Error>) -> Void) {
+        let token = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.token) ?? ""
+        guard !token.isEmpty else {
+            apiLogger.error("❌ [API] 更新文档权限：token为空")
+            completion(.failure(NSError(domain: "APIService", code: 401, userInfo: [NSLocalizedDescriptionKey: "未登录，无法更新文档权限"])))
+            return
+        }
+
+        guard self.configureNetworkIfNeeded() else {
+            apiLogger.error("❌ [API] 更新文档权限：未配置域名")
+            completion(.failure(NSError(domain: "APIService", code: -1, userInfo: [NSLocalizedDescriptionKey: "服务器未配置"])))
+            return
+        }
+
+        apiLogger.info("🔍 [API] 开始更新文档权限 | docId: \(docId, privacy: .public) | accountDnList: \(accountDnList.count)条 | deptDnList: \(deptDnList.count)条")
+
+        NetworkClient.shared.docAuthUpdate(token: token, docId: docId, accountDnList: accountDnList, deptDnList: deptDnList, isTemp: nil) { result in
+            switch result {
+            case .success(let message):
+                apiLogger.info("✅ [API] 文档权限更新成功 | message: \(message)")
+                completion(.success(message))
+            case .failure(let error):
+                apiLogger.error("❌ [API] 文档权限更新失败: \(error.localizedDescription)")
+                completion(.failure(error))
+            }
+        }
+    }
 }

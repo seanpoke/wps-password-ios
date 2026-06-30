@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		9F9E3ECC1906424D97780195AC76D198 /* APIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A434CB1ADB3D4A68A4EC6C019A76E84B /* APIService.swift */; };
+		A46408454E5F448DB865C7843130F9F5 /* APIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A434CB1ADB3D4A68A4EC6C019A76E84B /* APIService.swift */; };
+		C560791108E64D63A64A1450722D4B4C /* ECIESEncryptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30B3C4488B004252A869689164693D93 /* ECIESEncryptor.swift */; };
 		F431D9A02FDBDD9700C77928 /* DocumentShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F431D9962FDBDD9600C77928 /* DocumentShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		F431D9AB2FDBE02000C77928 /* AppGroupDBManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F431D9AA2FDBE02000C77928 /* AppGroupDBManager.swift */; };
 		F431D9AC2FDBE02100C77928 /* AppGroupDBManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F431D9AA2FDBE02000C77928 /* AppGroupDBManager.swift */; };
@@ -18,10 +21,9 @@
 		F4C000022FE0000100E709F3 /* UidGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4C000002FE00000000E709F3 /* UidGenerator.swift */; };
 		F4D1E0002FE0000000E709F3 /* NetworkClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4D1E0012FE0000000E709F3 /* NetworkClient.swift */; };
 		F4D1E0022FE0000000E709F3 /* NetworkClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4D1E0012FE0000000E709F3 /* NetworkClient.swift */; };
-		A46408454E5F448DB865C7843130F9F5 /* APIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A434CB1ADB3D4A68A4EC6C019A76E84B /* APIService.swift */; };
-		9F9E3ECC1906424D97780195AC76D198 /* APIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A434CB1ADB3D4A68A4EC6C019A76E84B /* APIService.swift */; };
 		F7512FD9880A4FC0B5FE738D2A904563 /* ECIESEncryptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30B3C4488B004252A869689164693D93 /* ECIESEncryptor.swift */; };
-		C560791108E64D63A64A1450722D4B4C /* ECIESEncryptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30B3C4488B004252A869689164693D93 /* ECIESEncryptor.swift */; };
+		F5A100012FE0000100E709F4 /* PermissionTreeModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5A100002FE0000100E709F4 /* PermissionTreeModel.swift */; };
+		F5A100022FE0000100E709F4 /* PermissionTreeModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5A100002FE0000100E709F4 /* PermissionTreeModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -49,6 +51,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+30B3C4488B004252A869689164693D93 /* ECIESEncryptor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ECIESEncryptor.swift; sourceTree = "<group>"; };
+		F5A100002FE0000100E709F4 /* PermissionTreeModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionTreeModel.swift; sourceTree = "<group>"; };
+A434CB1ADB3D4A68A4EC6C019A76E84B /* APIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIService.swift; sourceTree = "<group>"; };
 		F431D9842FDBDD3D00C77928 /* PasswordManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PasswordManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F431D9962FDBDD9600C77928 /* DocumentShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DocumentShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		F431D9AA2FDBE02000C77928 /* AppGroupDBManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroupDBManager.swift; sourceTree = "<group>"; };
@@ -56,8 +61,6 @@
 		F4BE62DE2FDFF1B600E709F3 /* OfficeCryptoVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfficeCryptoVerifier.swift; sourceTree = "<group>"; };
 		F4C000002FE00000000E709F3 /* UidGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UidGenerator.swift; sourceTree = "<group>"; };
 		F4D1E0012FE0000000E709F3 /* NetworkClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkClient.swift; sourceTree = "<group>"; };
-		A434CB1ADB3D4A68A4EC6C019A76E84B /* APIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIService.swift; sourceTree = "<group>"; };
-		30B3C4488B004252A869689164693D93 /* ECIESEncryptor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ECIESEncryptor.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -143,6 +146,7 @@
 				F4D1E0012FE0000000E709F3 /* NetworkClient.swift */,
 				A434CB1ADB3D4A68A4EC6C019A76E84B /* APIService.swift */,
 				30B3C4488B004252A869689164693D93 /* ECIESEncryptor.swift */,
+				F5A100002FE0000100E709F4 /* PermissionTreeModel.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -263,6 +267,7 @@
 				F4D1E0002FE0000000E709F3 /* NetworkClient.swift in Sources */,
 				A46408454E5F448DB865C7843130F9F5 /* APIService.swift in Sources */,
 				F7512FD9880A4FC0B5FE738D2A904563 /* ECIESEncryptor.swift in Sources */,
+				F5A100012FE0000100E709F4 /* PermissionTreeModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -277,6 +282,7 @@
 				F4D1E0022FE0000000E709F3 /* NetworkClient.swift in Sources */,
 				9F9E3ECC1906424D97780195AC76D198 /* APIService.swift in Sources */,
 				C560791108E64D63A64A1450722D4B4C /* ECIESEncryptor.swift in Sources */,
+				F5A100022FE0000100E709F4 /* PermissionTreeModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

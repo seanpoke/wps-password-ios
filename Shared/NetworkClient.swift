@@ -10,6 +10,8 @@ enum API {
     case logout(token: String)
     case docOwner(token: String, docId: String, fileName: String?)
     case docPassword(token: String, docId: String, encryPassword: String, keyVersion: String?, isTemp: Bool?)
+    case docAuthTree(token: String, docId: String)
+    case docAuthUpdate(token: String, docId: String, accountDnList: [String], deptDnList: [String], isTemp: Bool?)
 }
 
 extension API {
@@ -27,14 +29,18 @@ extension API {
             return "/doc/owner"
         case .docPassword:
             return "/doc/password"
+        case .docAuthTree:
+            return "/doc/auth/tree"
+        case .docAuthUpdate:
+            return "/doc/auth/update"
         }
     }
     
     var method: String {
         switch self {
-        case .login, .refreshToken, .logout, .docOwner, .docPassword:
+        case .login, .refreshToken, .logout, .docOwner, .docPassword, .docAuthUpdate:
             return "POST"
-        case .latestKey:
+        case .latestKey, .docAuthTree:
             return "GET"
         }
     }
@@ -47,6 +53,10 @@ extension API {
         case .docOwner(let token, _, _):
             headers["token"] = token
         case .docPassword(let token, _, _, _, _):
+            headers["token"] = token
+        case .docAuthTree(let token, _):
+            headers["token"] = token
+        case .docAuthUpdate(let token, _, _, _, _):
             headers["token"] = token
         default:
             break
@@ -63,7 +73,7 @@ extension API {
                     "password": password
                 ]
                 return try JSONSerialization.data(withJSONObject: params)
-            case .refreshToken, .latestKey, .logout:
+            case .refreshToken, .latestKey, .logout, .docAuthTree:
                 return nil
             case .docOwner(_, let docId, let fileName):
                 var params: [String: Any] = [
@@ -85,10 +95,29 @@ extension API {
                     params["isTemp"] = isTemp
                 }
                 return try JSONSerialization.data(withJSONObject: params)
+            case .docAuthUpdate(_, let docId, let accountDnList, let deptDnList, let isTemp):
+                var params: [String: Any] = [
+                    "docId": docId,
+                    "accountDnList": accountDnList,
+                    "deptDnList": deptDnList
+                ]
+                if let isTemp = isTemp {
+                    params["isTemp"] = isTemp
+                }
+                return try JSONSerialization.data(withJSONObject: params)
             }
         } catch {
             networkLogger.error("❌ [Network] 请求体序列化失败: \(error)")
             return nil
+        }
+    }
+    
+    var queryItems: [URLQueryItem] {
+        switch self {
+        case .docAuthTree(_, let docId):
+            return [URLQueryItem(name: "docId", value: docId)]
+        default:
+            return []
         }
     }
 }
@@ -128,6 +157,8 @@ struct DocOwnerResponseData: Codable {
 struct DocPasswordResponseData: Codable {
     let password: String
 }
+
+typealias DocAuthTreeResponseData = [PermissionNodeResponse]
 
 final class NetworkClient: NSObject, URLSessionDelegate {
     static let shared = NetworkClient()
@@ -175,7 +206,12 @@ final class NetworkClient: NSObject, URLSessionDelegate {
             return
         }
         
-        guard let url = URL(string: baseURL + api.path) else {
+        var urlComponents = URLComponents(string: baseURL + api.path)
+        if !api.queryItems.isEmpty {
+            urlComponents?.queryItems = api.queryItems
+        }
+        
+        guard let url = urlComponents?.url else {
             networkLogger.error("❌ [Network] 无效的URL: \(self.baseURL + api.path, privacy: .public)")
             completion(.failure(NetworkError.invalidURL))
             return
@@ -291,6 +327,14 @@ final class NetworkClient: NSObject, URLSessionDelegate {
     
     func docPassword(token: String, docId: String, encryPassword: String, keyVersion: String?, isTemp: Bool?, completion: @escaping (Result<DocPasswordResponseData, Error>) -> Void) {
         request(api: .docPassword(token: token, docId: docId, encryPassword: encryPassword, keyVersion: keyVersion, isTemp: isTemp), completion: completion)
+    }
+    
+    func docAuthTree(token: String, docId: String, completion: @escaping (Result<DocAuthTreeResponseData, Error>) -> Void) {
+        request(api: .docAuthTree(token: token, docId: docId), completion: completion)
+    }
+    
+    func docAuthUpdate(token: String, docId: String, accountDnList: [String], deptDnList: [String], isTemp: Bool?, completion: @escaping (Result<String, Error>) -> Void) {
+        request(api: .docAuthUpdate(token: token, docId: docId, accountDnList: accountDnList, deptDnList: deptDnList, isTemp: isTemp), completion: completion)
     }
     
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {

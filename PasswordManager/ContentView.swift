@@ -807,6 +807,11 @@ struct AssetDetailView: View {
     @State private var metadataPassword: String = ""
     @State private var metadataKeyVersion: String = ""
     
+    private var isOwner: Bool {
+        let currentAccount = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.account) ?? ""
+        return !record.owner_account.isEmpty && !currentAccount.isEmpty && record.owner_account == currentAccount
+    }
+    
     private var fileType: String {
         let lowerName = record.file_name.lowercased()
         if lowerName.hasSuffix(".docx") {
@@ -862,18 +867,10 @@ struct AssetDetailView: View {
                         InfoRow(label: "密钥版本", value: metadataKeyVersion)
                     }
                     
-                    Divider()
-                    
-                    VStack(spacing: 16) {
-                        Text("文档权限信息")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    if isOwner {
+                        Divider()
                         
-                        Text("暂无权限信息")
-                            .font(.body)
-                            .foregroundColor(.gray)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding()
+                        PermissionTreeView(docId: record.uid)
                     }
                 }
                 .padding()
