@@ -360,20 +360,18 @@ final class OfficeCryptoVerifier {
             return false
         }
         
-        // Step 2: 使用 kVerifierInputBlock 生成解密密钥，解密 verifierHashInput
-        // H_final = H(pwHash + blockKey)，用 0x36 填充到 keySize
+        // Step 2: 使用 kVerifierInputBlock 生成解密密钥和IV，解密 verifierHashInput
         let keySize = 16
         let verifierKey = generateKey(pwHash: pwHash, hashAlgorithm: hashAlgorithm, blockKey: kVerifierInputBlock, keySize: keySize)
         
         cryptoLogger.debug("🔐 [密码验证] verifierKey 长度: \(verifierKey.count)")
         
-        // IV 生成: generateIv(hashAlgo, salt, null, blockSize) -> IV = salt (用 0x36 填充到 blockSize)
-        let iv = generateIv(hashAlgorithm: hashAlgorithm, salt: salt, blockKey: nil, blockSize: 16)
+        // IV = salt 原文（msoffcrypto 实现直接用 salt 作为 AES-CBC IV）
+        let iv = salt
         
         cryptoLogger.debug("🔐 [密码验证] IV 长度: \(iv.count)")
-        cryptoLogger.debug("🔐 [密码验证] IV: \(iv.map { String(format: "%02X", $0) }.joined())")
         
-        // 解密 encryptedVerifierHashInput
+        // 解密 encryptedVerifierHashInput（无 PKCS7 padding，verifier 是随机 16 字节）
         let decryptedVerifier = aesDecrypt(
             data: encryptedVerifierHashInput,
             key: verifierKey,
@@ -385,8 +383,8 @@ final class OfficeCryptoVerifier {
             cryptoLogger.debug("🔐 [密码验证] 解密后的 verifier: \(ver.map { String(format: "%02X", $0) }.joined())")
         }
         
-        guard let verifier = decryptedVerifier, !verifier.isEmpty else {
-            cryptoLogger.error("❌ [密码验证] 解密 verifierHashInput 失败")
+        guard let verifier = decryptedVerifier, verifier.count == 16 else {
+            cryptoLogger.error("❌ [密码验证] 解密 verifierHashInput 失败（需要 16 字节）")
             return false
         }
         
@@ -396,12 +394,12 @@ final class OfficeCryptoVerifier {
         cryptoLogger.debug("🔐 [密码验证] verifierHash 长度: \(verifierHash.count)")
         cryptoLogger.debug("🔐 [密码验证] verifierHash: \(verifierHash.map { String(format: "%02X", $0) }.joined())")
         
-        // Step 4: 使用 kHashedVerifierBlock 生成解密密钥，解密 verifierHashValue
+        // Step 4: 使用 kHashedVerifierBlock 生成解密密钥和IV，解密 verifierHashValue
         let hashKey = generateKey(pwHash: pwHash, hashAlgorithm: hashAlgorithm, blockKey: kHashedVerifierBlock, keySize: keySize)
         
         cryptoLogger.debug("🔐 [密码验证] hashKey 长度: \(hashKey.count)")
         
-        // 解密 encryptedVerifierHashValue
+        // 解密 encryptedVerifierHashValue（同样用 salt 原文作 IV，无 PKCS7 padding）
         let decryptedVerifierHash = aesDecrypt(
             data: encryptedVerifierHashValue,
             key: hashKey,
@@ -498,7 +496,7 @@ final class OfficeCryptoVerifier {
         return result
     }
     
-    private func aesDecrypt(data: Data, key: Data.SubSequence, iv: Data) -> Data? {
+    private func aesDecrypt(data: Data, key: Data, iv: Data) -> Data? {
         let bufferSize = data.count + kCCBlockSizeAES128
         var decryptedBytes = [UInt8](repeating: 0, count: bufferSize)
         var numBytesDecrypted: size_t = 0
@@ -509,7 +507,7 @@ final class OfficeCryptoVerifier {
                     CCCrypt(
                         CCOperation(kCCDecrypt),
                         CCAlgorithm(kCCAlgorithmAES),
-                        CCOptions(kCCOptionPKCS7Padding),
+                        CCOptions(0),
                         keyBytes.baseAddress,
                         key.count,
                         ivBytes.baseAddress,
