@@ -172,7 +172,10 @@ struct ContentView: View {
                                         
                     if searchBarTapCount >= 3 {
                         searchBarTapCount = 0
-                        showDebugView = true
+                        let role = AppGroupDBManager.shared.getConfigValue(key: GlobalConfigKey.role) ?? ""
+                        if role == "admin" {
+                            showDebugView = true
+                        }
                     }
                 }
             }
@@ -283,7 +286,7 @@ struct ContentView: View {
         isRefreshing = true
         DispatchQueue.global().async {
             let allRecords = AppGroupDBManager.shared.queryAllLocalVaultRecords()
-            let sortedRecords = allRecords.sorted { $0.last_access_time > $1.last_access_time }
+            let sortedRecords = allRecords.sorted { $0.update_time > $1.update_time }
             searchIndex.buildIndex(records: sortedRecords)
             DispatchQueue.main.async {
                 records = sortedRecords
